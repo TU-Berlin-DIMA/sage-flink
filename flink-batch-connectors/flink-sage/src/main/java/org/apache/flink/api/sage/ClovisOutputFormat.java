@@ -18,33 +18,46 @@
 
 package org.apache.flink.api.sage;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
 
+import org.apache.flink.api.common.io.CleanupWhenUnsuccessful;
 import org.apache.flink.api.common.io.RichOutputFormat;
+import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FSDataOutputStream;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.fs.FileSystem.WriteMode;
+import org.apache.flink.types.StringValue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
+import com.google.common.base.Charsets;
+
+public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> implements CleanupWhenUnsuccessful {
 	
 	private static final long serialVersionUID = 1L;
+	private static final Logger LOG = LoggerFactory.getLogger(ClovisOutputFormat.class);
 	
-	private static StorageType DEFAULT_STORAGE_TYPE = StorageType.STORAGE_TYPE_1;
-	private static WriteMode DEFAULT_WRITE_MODE = WriteMode.NO_OVERWRITE;
-	private static final int NEWLINE = '\n';
+	private static final StorageType DEFAULT_STORAGE_TYPE = StorageType.STORAGE_TYPE_1;
+	private static final WriteMode DEFAULT_WRITE_MODE = WriteMode.NO_OVERWRITE;
+	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
+	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
 	
 	private Path path;
 	private StorageType storageType;
 	private WriteMode writeMode;
+	private boolean allowNullValues = true;
+	private boolean quoteStrings = false;
+	
+	private byte[] fieldDelim = DEFAULT_FIELD_DELIMITER;
+	private byte[] recordDelim = DEFAULT_LINE_DELIMITER;
 	
 	private int taskNumber;
-	private int numTasks;
-	
 	
 	private int currentBufferNumber;
 	private int bytesLeft;
@@ -55,11 +68,6 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 	
 	private transient Charset charset;
 
-	/**
-	 * The output directory mode
-	 */
-//	private OutputDirectoryMode outputDirectoryMode;
-	
 	/** The stream to which the data is written; */
 	protected transient FSDataOutputStream stream;
 	
@@ -166,7 +174,6 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 		}
 		
 		this.taskNumber = taskNumber;
-		this.numTasks = numTasks;
 		this.currentBufferNumber = 0;
 		this.bytesLeft = BUFFER_SIZE;
 		
@@ -195,21 +202,53 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 		this.fileCreated = true;
 	}
 	
-//	protected String getDirectoryFileName(int taskNumber) {
-//		return Integer.toString(taskNumber + 1);
-//	}
-	
 	private String getFileName(int taskNumber, int currentBufferNumber) {
 		StringBuilder sb = new StringBuilder("/(");
 		sb.append(taskNumber).append(",").append(currentBufferNumber).append(")");
 		return sb.toString();
-		
-//		return "/"+ currentBufferNumber*numTasks + taskNumber;
 	}
 
 	@Override
-	public void writeRecord(T record) throws IOException {
-		byte[] bytes = record.toString().getBytes(charset);
+	public void writeRecord(T element) throws IOException {
+		
+		int numFields = element.getArity();
+		
+		StringBuilder writer = new StringBuilder();
+
+		for (int i = 0; i < numFields; i++) {
+			Object v = element.getField(i);
+			if (v != null) {
+				if (i != 0) {
+					writer.append(new String(fieldDelim, Charsets.UTF_8));
+				}
+
+				if (quoteStrings) {
+					if (v instanceof String || v instanceof StringValue) {
+						writer.append('"');
+						writer.append(v.toString());
+						writer.append('"');
+					} else {
+						writer.append(v.toString());
+					}
+				} else {
+					writer.append(v.toString());
+				}
+			} else {
+				if (this.allowNullValues) {
+					if (i != 0) {
+						writer.append(new String(fieldDelim, Charsets.UTF_8));
+					}
+				} else {
+					throw new RuntimeException("Cannot write tuple with <null> value at position: " + i);
+				}
+			}
+		}
+
+		// add the record delimiter
+		writer.append(new String(recordDelim, Charsets.UTF_8));
+		
+		byte[] bytes = writer.toString().getBytes();
+		
 		if (bytes.length > bytesLeft) {
 			FileSystem fs = path.getFileSystem();
 			final FSDataOutputStream s = this.stream;
@@ -226,7 +265,6 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 			throw new IOException("File " + actualFilePath + "could not be created");
 		}
 		this.stream.write(bytes);
-		this.stream.write(NEWLINE);
 		
 		this.bytesLeft -= bytes.length;
 	}
@@ -259,19 +297,6 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 		this.path = path;
 	}
 	
-//	public void setOutputDirectoryMode(OutputDirectoryMode mode) {
-//		if (mode == null) {
-//			throw new NullPointerException();
-//		}
-//		
-//		this.outputDirectoryMode = mode;
-//	}
-//	
-//	public OutputDirectoryMode getOutputDirectoryMode() {
-//		return this.outputDirectoryMode;
-//	}
-	
-	
 	public WriteMode getWriteMode() {
 		return writeMode;
 	}
@@ -286,6 +311,84 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> {
 
 	public void setCharsetName(String charsetName) {
 		this.charsetName = charsetName;
+	}
+	
+	/**
+	 * Configures the format to either allow null values (writing an empty field),
+	 * or to throw an exception when encountering a null field.
+	 * <p>
+	 * by default, null values are allowed.
+	 *
+	 * @param allowNulls Flag to indicate whether the output format should accept null values.
+	 */
+	public void setAllowNullValues(boolean allowNulls) {
+		this.allowNullValues = allowNulls;
+	}
+	
+	/**
+	 * Configures whether the output format should quote string values. String values are fields
+	 * of type {@link java.lang.String} and {@link org.apache.flink.types.StringValue}, as well as
+	 * all subclasses of the latter.
+	 * <p>
+	 * By default, strings are not quoted.
+	 *
+	 * @param quoteStrings Flag indicating whether string fields should be quoted.
+	 */
+	public void setQuoteStrings(boolean quoteStrings) {
+		this.quoteStrings = quoteStrings;
+	}
+	
+	public void setFieldDelimiter(byte[] delimiter) {
+		if (delimiter == null) {
+			throw new IllegalArgumentException("Delimiter must not be null");
+		}
+
+		this.fieldDelim = delimiter;
+	}
+
+	public void setFieldDelimiter(char delimiter) {
+		setFieldDelimiter(String.valueOf(delimiter));
+	}
+
+	public void setFieldDelimiter(String delimiter) {
+		this.fieldDelim = delimiter.getBytes(Charsets.UTF_8);
+	}
+	
+	public void setRecordDelimiter(byte[] delimiter) {
+		if (delimiter == null) {
+			throw new IllegalArgumentException("Delimiter must not be null");
+		}
+
+		this.recordDelim = delimiter;
+	}
+
+	public void setRecordDelimiter(char delimiter) {
+		setRecordDelimiter(String.valueOf(delimiter));
+	}
+
+	public void setRecordDelimiter(String delimiter) {
+		this.recordDelim = delimiter.getBytes(Charsets.UTF_8);
+	}
+	
+	@Override
+	public void tryCleanupOnError() {
+		if (this.fileCreated) {
+			this.fileCreated = false;
+			
+			try {
+				close();
+			} catch (IOException e) {
+				LOG.error("Could not properly close FileOutputFormat.", e);
+			}
+
+			try {
+				FileSystem.get(this.actualFilePath.toUri()).delete(actualFilePath, false);
+			} catch (FileNotFoundException e) {
+				// ignore, may not be visible yet or may be already removed
+			} catch (Throwable t) {
+				LOG.error("Could not remove the incomplete file " + actualFilePath);
+			}
+		}
 	}
 
 }
