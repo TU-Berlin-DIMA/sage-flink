@@ -20,9 +20,16 @@ package org.apache.flink.api.sage;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.BufferOverflowException;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.flink.api.common.io.CleanupWhenUnsuccessful;
 import org.apache.flink.api.common.io.RichOutputFormat;
@@ -48,6 +55,10 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
 	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
 	
+	private static final int BUFFER_QUEUE_CAPACITY = 20;
+	private static final int WRITE_RETRY_ATTEMPTS = 2;
+	private static final int WRITE_TASKS_TERMINATION_TIMEOUT_SEC = 5;
+	
 	private Path path;
 	private StorageType storageType;
 	private WriteMode writeMode;
@@ -60,7 +71,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	private int taskNumber;
 	
 	private int currentBufferNumber;
-	private int bytesLeft;
 	
 	private transient Path actualFilePath;
 	
@@ -70,6 +80,11 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 
 	/** The stream to which the data is written; */
 	protected transient FSDataOutputStream stream;
+	
+	private transient CustomThreadPoolExecutor executor;
+	private transient BlockingQueue<Buffer> queue;
+	
+	private transient Buffer currentBuffer;
 	
 	/** Flag indicating whether this format actually created a file, which should be removed on cleanup. */
 	private transient boolean fileCreated;
@@ -110,7 +125,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	public static final String FILE_PARAMETER_KEY = "flink.output.file";
 	
 	public static final String STORAGE_TYPE_PARAMETER_KEY = "storage.type";
-	public static final int BUFFER_SIZE = 1024;
 	
 	public ClovisOutputFormat() {}
 	
@@ -175,7 +189,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		
 		this.taskNumber = taskNumber;
 		this.currentBufferNumber = 0;
-		this.bytesLeft = BUFFER_SIZE;
 		
 		path = path.suffix("/storage" + storageType.toString() + "/");
 		
@@ -198,6 +211,16 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		// create output file
 		this.stream = fs.create(this.actualFilePath, writeMode == WriteMode.OVERWRITE);
 		
+		this.executor = new CustomThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
+				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
+				WRITE_RETRY_ATTEMPTS);
+		
+		this.queue = new ArrayBlockingQueue<Buffer>(BUFFER_QUEUE_CAPACITY);
+		
+		for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
+			queue.add(new Buffer());
+		}
+		
 		// at this point, the file creation must have succeeded, or an exception has been thrown
 		this.fileCreated = true;
 	}
@@ -211,71 +234,95 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	@Override
 	public void writeRecord(T element) throws IOException {
 		
+		if (executor.hasFailedTasks()) {
+			throw new IOException("Buffer could not be persisted");
+		}
+		
 		int numFields = element.getArity();
 		
-		StringBuilder writer = new StringBuilder();
+		StringBuilder sb = new StringBuilder();
 
 		for (int i = 0; i < numFields; i++) {
 			Object v = element.getField(i);
 			if (v != null) {
 				if (i != 0) {
-					writer.append(new String(fieldDelim, Charsets.UTF_8));
+					sb.append(new String(fieldDelim, Charsets.UTF_8));
 				}
 
 				if (quoteStrings) {
 					if (v instanceof String || v instanceof StringValue) {
-						writer.append('"');
-						writer.append(v.toString());
-						writer.append('"');
+						sb.append('"');
+						sb.append(v.toString());
+						sb.append('"');
 					} else {
-						writer.append(v.toString());
+						sb.append(v.toString());
 					}
 				} else {
-					writer.append(v.toString());
+					sb.append(v.toString());
 				}
 			} else {
 				if (this.allowNullValues) {
 					if (i != 0) {
-						writer.append(new String(fieldDelim, Charsets.UTF_8));
+						sb.append(new String(fieldDelim, Charsets.UTF_8));
 					}
 				} else {
-					throw new RuntimeException("Cannot write tuple with <null> value at position: " + i);
+					throw new IOException("Cannot write tuple with <null> value at position: " + i);
 				}
 			}
 		}
 
 		// add the record delimiter
-		writer.append(new String(recordDelim, Charsets.UTF_8));
+		sb.append(new String(recordDelim, Charsets.UTF_8));
 		
-		byte[] bytes = writer.toString().getBytes();
-		
-		if (bytes.length > bytesLeft) {
-			FileSystem fs = path.getFileSystem();
-			final FSDataOutputStream s = this.stream;
-			if (this.stream != null) {
-				this.stream = null;
-				s.close();
+		if (currentBuffer == null) {
+			try {
+				currentBuffer = queue.take();
+			} catch (InterruptedException e) {
+				throw new IOException("Could not obtaine the free buffer from the system");
 			}
+		}
+		
+		byte[] bytes = sb.toString().getBytes(charset);
+		
+		if (!currentBuffer.write(bytes)) {
+			
+			WriteTask task = new WriteTask(currentBuffer, queue, stream);
+			executor.execute(task);
+			
 			currentBufferNumber++;
 			this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
+			
+			try {
+				currentBuffer = queue.take();
+			} catch (InterruptedException e) {
+				throw new IOException("Could not obtaine the free buffer from the system");
+			}
+			FileSystem fs = path.getFileSystem();
 			this.stream = fs.create(this.actualFilePath, writeMode == WriteMode.OVERWRITE);
-			this.bytesLeft = BUFFER_SIZE;
 		}
-		if (this.stream == null) {
-			throw new IOException("File " + actualFilePath + "could not be created");
-		}
-		this.stream.write(bytes);
-		
-		this.bytesLeft -= bytes.length;
 	}
 
 	@Override
 	public void close() throws IOException {
-		final FSDataOutputStream s = this.stream;
-		if (s != null) {
-			this.stream = null;
-			s.close();
-		}		
+		
+		if (currentBuffer != null) {
+			WriteTask task = new WriteTask(currentBuffer, queue, stream);
+			executor.execute(task);
+		}
+		
+		try {
+			executor.shutdown();
+			executor.awaitTermination((long)WRITE_TASKS_TERMINATION_TIMEOUT_SEC, TimeUnit.SECONDS);
+			if (executor.hasFailedTasks()) {
+				throw new IOException("Buffers could not be persisted");
+			}
+		} catch (InterruptedException e) {
+			throw new IOException(e);
+		}
+		
+		if (!executor.isTerminated()) {
+			throw new IOException("Buffers could not be persisted");
+		} 
 	}
 
 	public StorageType getStorageType() {
@@ -390,5 +437,116 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 			}
 		}
 	}
+	
+	class WriteTask implements Runnable {
+		
+		private BlockingQueue<Buffer> queue;
+		private Buffer buffer;
+		private FSDataOutputStream stream;
+		private int retryAttempt;
+		
+		public WriteTask(Buffer buffer, BlockingQueue<Buffer> queue, FSDataOutputStream stream) {
+			this.queue = queue;
+			this.buffer = buffer;
+			this.stream = stream;
+			setRetryAttempt(0);
+		}
+
+		@Override
+		public void run() {
+			ByteBuffer byteBuffer = buffer.getByteBuffer();
+			try {
+				byteBuffer.flip();
+				stream.write(byteBuffer.array(), 0, byteBuffer.limit());
+				cleanup();
+			} catch (Exception e) {
+				byteBuffer.flip();
+				throw new RuntimeException(e);
+			}
+			
+		}
+		
+		public void cleanup() throws InterruptedException, IOException {
+			buffer.getByteBuffer().clear();
+			queue.put(buffer);
+			final FSDataOutputStream s = this.stream;
+			if (s != null) {
+				this.stream = null;
+				s.close();
+			}
+		}
+
+		public int getRetryAttempt() {
+			return retryAttempt;
+		}
+
+		public void setRetryAttempt(int retryAttempt) {
+			this.retryAttempt = retryAttempt;
+		}
+	}
+
+	class Buffer {
+		
+		public static final int BUFFER_SIZE = 1024;
+		
+		private ByteBuffer byteBuffer;
+		
+		public Buffer() {
+			byte[] bytes = new byte[BUFFER_SIZE];
+			this.byteBuffer = ByteBuffer.wrap(bytes);
+		}
+		
+		public boolean write(byte[] record) {
+			try {
+				byteBuffer.put(record);
+				return true;
+			} catch (BufferOverflowException e) {
+				return false;
+			}
+		}
+		
+		public ByteBuffer getByteBuffer() {
+			return byteBuffer;
+		}
+	}
+	
+	class CustomThreadPoolExecutor extends ThreadPoolExecutor {
+		
+		private int retryAttempts;
+		private boolean failedTasks;
+
+		public CustomThreadPoolExecutor(int corePoolSize, int maximumPoolSize,
+				long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, int retryAttempts) {
+			super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
+			this.retryAttempts = retryAttempts;
+			this.failedTasks = false;
+		}
+		
+		@Override
+		public void afterExecute(Runnable r, Throwable t) {
+			super.afterExecute(r, t);
+			if (t != null) {
+				WriteTask writeTask = (WriteTask) r;
+				
+				if (writeTask.getRetryAttempt() > retryAttempts) {
+					try {
+						writeTask.cleanup();
+					} catch (InterruptedException | IOException e) {
+						//do nothing
+					}
+					failedTasks = true;
+				} else {
+					writeTask.setRetryAttempt(writeTask.getRetryAttempt() + 1);
+					execute(writeTask);
+				}
+			}
+		}
+		
+		public boolean hasFailedTasks() {
+			return failedTasks;
+		}
+	}
 
 }
+
+
