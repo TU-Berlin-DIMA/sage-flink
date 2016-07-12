@@ -18,20 +18,15 @@
 
 package org.apache.flink.api.sage;
 
-import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.nio.BufferOverflowException;
-import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.flink.api.common.io.CleanupWhenUnsuccessful;
 import org.apache.flink.api.common.io.RichOutputFormat;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.configuration.Configuration;
@@ -45,7 +40,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Charsets;
 
-public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> implements CleanupWhenUnsuccessful {
+public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	
 	private static final long serialVersionUID = 1L;
 	private static final Logger LOG = LoggerFactory.getLogger(ClovisOutputFormat.class);
@@ -58,6 +53,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	private static final int BUFFER_QUEUE_CAPACITY = 20;
 	private static final int WRITE_RETRY_ATTEMPTS = 2;
 	private static final int WRITE_TASKS_TERMINATION_TIMEOUT_SEC = 5;
+	private static final int BUFFER_WAIT_TIMEOUT_SEC = 5;
 	
 	private Path path;
 	private StorageType storageType;
@@ -78,16 +74,10 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	
 	private transient Charset charset;
 
-	/** The stream to which the data is written; */
-	protected transient FSDataOutputStream stream;
+	private transient ClovisThreadPoolExecutor executor;
+	private transient BlockingQueue<ClovisBuffer> queue;
 	
-	private transient CustomThreadPoolExecutor executor;
-	private transient BlockingQueue<Buffer> queue;
-	
-	private transient Buffer currentBuffer;
-	
-	/** Flag indicating whether this format actually created a file, which should be removed on cleanup. */
-	private transient boolean fileCreated;
+	private transient ClovisBuffer currentBuffer;
 	
 	public static enum StorageType {
 		STORAGE_TYPE_1("1"),
@@ -192,7 +182,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		
 		path = path.suffix("/storage" + storageType.toString() + "/");
 		
-		FileSystem fs = path.getFileSystem();
 		initializePath(path);
 		
 		try {
@@ -208,21 +197,17 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		// Suffix the path with the parallel instance index, if needed
 		this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
 
-		// create output file
-		this.stream = fs.create(this.actualFilePath, writeMode == WriteMode.OVERWRITE);
-		
-		this.executor = new CustomThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
+		this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
 				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
 				WRITE_RETRY_ATTEMPTS);
 		
-		this.queue = new ArrayBlockingQueue<Buffer>(BUFFER_QUEUE_CAPACITY);
-		
-		for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
-			queue.add(new Buffer());
+		if (this.queue == null) {
+			this.queue = new ArrayBlockingQueue<ClovisBuffer>(BUFFER_QUEUE_CAPACITY);
+			
+			for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
+				queue.add(new ClovisBuffer());
+			}
 		}
-		
-		// at this point, the file creation must have succeeded, or an exception has been thrown
-		this.fileCreated = true;
 	}
 	
 	private String getFileName(int taskNumber, int currentBufferNumber) {
@@ -286,19 +271,23 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		
 		if (!currentBuffer.write(bytes)) {
 			
-			WriteTask task = new WriteTask(currentBuffer, queue, stream);
+			WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
 			executor.execute(task);
 			
 			currentBufferNumber++;
 			this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
 			
+			currentBuffer = null;
 			try {
-				currentBuffer = queue.take();
+				while (currentBuffer == null) {
+					currentBuffer = queue.poll(BUFFER_WAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
+					if (executor.hasFailedTasks()) {
+						throw new IOException("Could not obtain the free buffer from the system");
+					}
+				}
 			} catch (InterruptedException e) {
-				throw new IOException("Could not obtaine the free buffer from the system");
+				throw new IOException("Could not obtain the free buffer from the system");
 			}
-			FileSystem fs = path.getFileSystem();
-			this.stream = fs.create(this.actualFilePath, writeMode == WriteMode.OVERWRITE);
 		}
 	}
 
@@ -306,8 +295,9 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 	public void close() throws IOException {
 		
 		if (currentBuffer != null) {
-			WriteTask task = new WriteTask(currentBuffer, queue, stream);
+			WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
 			executor.execute(task);
+			currentBuffer = null;
 		}
 		
 		try {
@@ -417,57 +407,36 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 		this.recordDelim = delimiter.getBytes(Charsets.UTF_8);
 	}
 	
-	@Override
-	public void tryCleanupOnError() {
-		if (this.fileCreated) {
-			this.fileCreated = false;
-			
-			try {
-				close();
-			} catch (IOException e) {
-				LOG.error("Could not properly close FileOutputFormat.", e);
-			}
-
-			try {
-				FileSystem.get(this.actualFilePath.toUri()).delete(actualFilePath, false);
-			} catch (FileNotFoundException e) {
-				// ignore, may not be visible yet or may be already removed
-			} catch (Throwable t) {
-				LOG.error("Could not remove the incomplete file " + actualFilePath);
-			}
-		}
-	}
-	
-	class WriteTask implements Runnable {
+	class WriteTask implements ClovisAsyncTask {
 		
-		private BlockingQueue<Buffer> queue;
-		private Buffer buffer;
+		private BlockingQueue<ClovisBuffer> queue;
+		private ClovisBuffer buffer;
 		private FSDataOutputStream stream;
 		private int retryAttempt;
 		
-		public WriteTask(Buffer buffer, BlockingQueue<Buffer> queue, FSDataOutputStream stream) {
+		public WriteTask(ClovisBuffer buffer, BlockingQueue<ClovisBuffer> queue, Path path) throws IOException {
 			this.queue = queue;
 			this.buffer = buffer;
-			this.stream = stream;
+			FileSystem fs = path.getFileSystem();
+			this.stream = fs.create(path, writeMode == WriteMode.OVERWRITE);
 			setRetryAttempt(0);
 		}
 
 		@Override
 		public void run() {
-			ByteBuffer byteBuffer = buffer.getByteBuffer();
 			try {
-				byteBuffer.flip();
-				stream.write(byteBuffer.array(), 0, byteBuffer.limit());
+				buffer.flip();
+				stream.write(buffer.array(), 0, buffer.limit());
 				cleanup();
 			} catch (Exception e) {
-				byteBuffer.flip();
+				buffer.flip();
 				throw new RuntimeException(e);
 			}
 			
 		}
 		
 		public void cleanup() throws InterruptedException, IOException {
-			buffer.getByteBuffer().clear();
+			buffer.clear();
 			queue.put(buffer);
 			final FSDataOutputStream s = this.stream;
 			if (s != null) {
@@ -484,69 +453,4 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> imp
 			this.retryAttempt = retryAttempt;
 		}
 	}
-
-	class Buffer {
-		
-		public static final int BUFFER_SIZE = 1024;
-		
-		private ByteBuffer byteBuffer;
-		
-		public Buffer() {
-			byte[] bytes = new byte[BUFFER_SIZE];
-			this.byteBuffer = ByteBuffer.wrap(bytes);
-		}
-		
-		public boolean write(byte[] record) {
-			try {
-				byteBuffer.put(record);
-				return true;
-			} catch (BufferOverflowException e) {
-				return false;
-			}
-		}
-		
-		public ByteBuffer getByteBuffer() {
-			return byteBuffer;
-		}
-	}
-	
-	class CustomThreadPoolExecutor extends ThreadPoolExecutor {
-		
-		private int retryAttempts;
-		private boolean failedTasks;
-
-		public CustomThreadPoolExecutor(int corePoolSize, int maximumPoolSize,
-				long keepAliveTime, TimeUnit unit, BlockingQueue<Runnable> workQueue, int retryAttempts) {
-			super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue);
-			this.retryAttempts = retryAttempts;
-			this.failedTasks = false;
-		}
-		
-		@Override
-		public void afterExecute(Runnable r, Throwable t) {
-			super.afterExecute(r, t);
-			if (t != null) {
-				WriteTask writeTask = (WriteTask) r;
-				
-				if (writeTask.getRetryAttempt() > retryAttempts) {
-					try {
-						writeTask.cleanup();
-					} catch (InterruptedException | IOException e) {
-						//do nothing
-					}
-					failedTasks = true;
-				} else {
-					writeTask.setRetryAttempt(writeTask.getRetryAttempt() + 1);
-					execute(writeTask);
-				}
-			}
-		}
-		
-		public boolean hasFailedTasks() {
-			return failedTasks;
-		}
-	}
-
 }
-
-

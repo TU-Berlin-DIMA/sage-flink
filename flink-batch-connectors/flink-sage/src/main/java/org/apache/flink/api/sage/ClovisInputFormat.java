@@ -22,7 +22,12 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.flink.api.common.io.DefaultInputSplitAssigner;
 import org.apache.flink.api.common.io.ParseException;
@@ -54,12 +59,14 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private static final long serialVersionUID = 1L;
 	
-	private static final int BUFFER_SIZE = 1024;
 	private static final Class<?>[] EMPTY_TYPES = new Class<?>[0];
 	
 	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
 	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
 	private static final byte BACKSLASH = 92;
+	private static final int BUFFER_QUEUE_CAPACITY = 20;
+	private static final int READ_RETRY_ATTEMPTS = 2;
+	private static final int BUFFER_WAIT_TIMEOUT_SEC = 5;
 	
 	private static final boolean[] EMPTY_INCLUDED = new boolean[0];
 	
@@ -83,19 +90,14 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private TupleSerializerBase<T> tupleSerializer;
 
-	/**
-	 * Current input stream reading from the input file.
-	 */
-	private transient FSDataInputStream currentStream;
-	private transient int currOffset;			// offset in above buffer
-	private transient int currLen;				// length of current byte sequence
-	private transient Iterator<Path> bufferIterator;
+	private transient BlockingQueue<ClovisBuffer> fullBufferQueue;
+	private transient LinkedList<ClovisBuffer> cleanBuffers;
+	private transient ClovisThreadPoolExecutor executor;
 	
-	private transient int readPos;
-	private transient int limit;
+	private transient ClovisBuffer currentBuffer;
+	
+	private transient Iterator<Path> splitsIterator;
 	private transient boolean end;
-	
-	private transient byte[] readBuffer;
 	
 	/**
 	 * The desired number of splits, as set by the configure() method.
@@ -252,14 +254,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public void open(ClovisInputSplit split) throws IOException {
 		
-		this.bufferIterator = Arrays.asList(split.getBuffers()).iterator();
+		this.splitsIterator = Arrays.asList(split.getBuffers()).iterator();
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Opening input split " + split.getSplitNumber());
-		}
-
-		if (this.readBuffer == null) {
-			this.readBuffer = new byte[BUFFER_SIZE];
 		}
 		
 		// instantiate the parsers
@@ -292,37 +290,32 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		for (int i = 0; i < fieldParsers.length; i++) {
 			this.parsedValues[i] = fieldParsers[i].createValue();
 		}
+
+		this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
+				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
+				READ_RETRY_ATTEMPTS);
 		
-		fillBuffer();
-	}
-	
-	private boolean fillBuffer() throws IOException {
-		if (this.currentStream == null) {
-			if (bufferIterator.hasNext()) {
-				Path currentBuffer = bufferIterator.next();
-				final FileSystem fs = FileSystem.get(currentBuffer.toUri());
-				currentStream = fs.open(currentBuffer);
-				this.readPos = 0;
-				this.limit = 0;
-				this.end = false;
-			} else {
-				this.end = true;
-				return false;
+		if (fullBufferQueue == null) {
+			this.fullBufferQueue = new ArrayBlockingQueue<ClovisBuffer>(BUFFER_QUEUE_CAPACITY);
+		}
+		
+		if (this.cleanBuffers == null) {
+			cleanBuffers = new LinkedList<ClovisBuffer>();
+			for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
+				this.cleanBuffers.add(new ClovisBuffer());
 			}
 		}
-		int read = this.currentStream.read(this.readBuffer);
-		final FSDataInputStream s = this.currentStream;
-		this.currentStream = null;
-		s.close();
-		if (read == -1) {
-			return fillBuffer();
-		} else {
-			this.readPos = 0;
-			this.limit = read;
-			return true;
+		
+		for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
+			if (splitsIterator.hasNext()) {
+				executor.execute(new ReadTask(cleanBuffers.pollLast(), fullBufferQueue, splitsIterator.next()));
+			}
 		}
+		
+		this.end = false;
+		
 	}
-
+	
 	@Override
 	public boolean reachedEnd() throws IOException {
 		return end;
@@ -330,38 +323,34 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 	@Override
 	public T nextRecord(T reuse) throws IOException {
-		if (this.readBuffer == null || (this.readPos >= this.limit)) {
-			if (!fillBuffer()) {
-				return null;
+		if (currentBuffer == null || !currentBuffer.read(recordDelim)) {
+			try {
+				if (currentBuffer != null)  {
+					if (splitsIterator.hasNext()) {
+						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, splitsIterator.next()));
+					} else {
+						cleanBuffers.add(currentBuffer);
+						if (cleanBuffers.size() == BUFFER_QUEUE_CAPACITY) {
+							currentBuffer = null;
+							end = true;
+							return null;
+						}
+					}
+				}
+				currentBuffer = null;
+				while (currentBuffer == null) {
+					currentBuffer = fullBufferQueue.poll(BUFFER_WAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
+					if (executor.hasFailedTasks()) {
+						throw new IOException("Could not fill the buffer");
+					}
+				}
+				return nextRecord(reuse);
+			} catch (InterruptedException e) {
+				throw new IOException("Could not fill the buffer");
 			}
 		}
 		
-		/* position of matching positions in the delimiter byte array */
-		int i = 0;
-
-		int startPos = this.readPos;
-		int count;
-
-		while (this.readPos < this.limit && i < this.recordDelim.length) {
-			if ((this.readBuffer[this.readPos++]) == this.recordDelim[i]) {
-				i++;
-			} else {
-				i = 0;
-			}
-
-		}
-
-		// check why we dropped out
-		if (i == this.recordDelim.length) {
-			count = this.readPos - startPos - this.recordDelim.length;
-		} else {
-			count = this.limit - startPos;
-		}
-		
-		this.currOffset = startPos;
-		this.currLen = count;
-		
-		if (parseRecord(parsedValues, readBuffer, currOffset, currLen)) {
+		if (parseRecord(parsedValues, currentBuffer.array(), currentBuffer.getCurrentOffset(), currentBuffer.getCurrentLength())) {
 			fillRecord(reuse, parsedValues);
 		} else {
 			return null;
@@ -370,7 +359,6 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	}
 	
 	private T fillRecord(T reuse, Object[] parsedValues) {
-		
 		
 		if (tupleSerializer == null)  {
 			TypeInformation<T> typeInfo = TypeExtractor.getForObject(reuse);
@@ -383,12 +371,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 	@Override
 	public void close() throws IOException {
-		final FSDataInputStream s = this.currentStream;
-		if (s != null) {
-			this.currentStream = null;
-			s.close();
-		}	
-		this.readBuffer = null;
+		executor.shutdown();
+		if (executor.hasFailedTasks()) {
+			throw new IOException("Read was not successful");
+		}
 	}
 	
 	public void setFields(boolean[] includedMask, Class<?>[] fieldTypes) {
@@ -663,6 +649,60 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	public Integer getBuffersPerSplit() {
 		return buffersPerSplit;
 	}
+	
+	public class ReadTask implements ClovisAsyncTask {
+		
+		private BlockingQueue<ClovisBuffer> queue;
+		private ClovisBuffer buffer;
+		private FSDataInputStream stream;
+		private int retryAttempt;
+		
+		public ReadTask(ClovisBuffer buffer, BlockingQueue<ClovisBuffer> queue, Path path) throws IOException {
+			this.queue = queue;
+			this.buffer = buffer;
+			final FileSystem fs = FileSystem.get(path.toUri());
+			this.stream = fs.open(path);
+			this.retryAttempt = 0;
+		}
+
+		@Override
+		public void run() {
+			try {
+				this.buffer.clear();
+				int read = this.stream.read(this.buffer.array());
+				if (read == -1) {
+					throw new RuntimeException("Buffer could not be filled");
+				} else {
+					buffer.flip();
+					buffer.setLimit(read);
+					queue.put(buffer);
+					cleanup();
+				}
+			} catch (IOException | InterruptedException e) {
+				throw new RuntimeException(e);
+			}
+		}
+
+		@Override
+		public void cleanup() throws InterruptedException, IOException {
+			final FSDataInputStream s = this.stream;
+			if (s != null) {
+				this.stream = null;
+				s.close();
+			}
+		}
+
+		@Override
+		public int getRetryAttempt() {
+			return retryAttempt;
+		}
+
+		@Override
+		public void setRetryAttempt(int retryAttempt) {
+			this.retryAttempt = retryAttempt;
+		}
+	}
+	
 	
 	// ============================================================================================
 	//  Parameterization via configuration
