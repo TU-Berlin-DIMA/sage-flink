@@ -50,12 +50,33 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
 	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
 	
+	/**
+	 * Maximum number of buffers in the write queue
+	 */
 	private static final int BUFFER_QUEUE_CAPACITY = 20;
+	
+	/**
+	 * Maximum number of times the read task will be re-scheduled upon failure
+	 */
 	private static final int WRITE_RETRY_ATTEMPTS = 2;
+	
+	/**
+	 * The period to wait for termination of all write tasks on the closure of InputFormat
+	 */
 	private static final int WRITE_TASKS_TERMINATION_TIMEOUT_SEC = 5;
+	
+	/**
+	 * Periods the nextRecord method will wait to get the next
+	 * clean buffer from the queue between checking for the presence
+	 * of failed WriteTasks
+	 */
 	private static final int BUFFER_WAIT_TIMEOUT_SEC = 5;
 	
 	private Path path;
+	
+	/**
+	 * The preferable storage type for this OutputFormat
+	 */
 	private StorageType storageType;
 	private WriteMode writeMode;
 	private boolean allowNullValues = true;
@@ -64,10 +85,19 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	private byte[] fieldDelim = DEFAULT_FIELD_DELIMITER;
 	private byte[] recordDelim = DEFAULT_LINE_DELIMITER;
 	
+	/**
+	 * Number of current task
+	 */
 	private int taskNumber;
 	
+	/**
+	 * The number of the buffer currently written into
+	 */
 	private int currentBufferNumber;
 	
+	/**
+	 * The path (i.e. Object name) written into
+	 */
 	private transient Path actualFilePath;
 	
 	private String charsetName;
@@ -75,10 +105,23 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	private transient Charset charset;
 
 	private transient ClovisThreadPoolExecutor executor;
+	
+	/**
+	 * The queue holding the clean buffers to be filled and given to WriteTasks for persistance
+	 */
 	private transient BlockingQueue<ClovisBuffer> queue;
 	
+	/**
+	 * The buffer we currently write to
+	 */
 	private transient ClovisBuffer currentBuffer;
 	
+	/**
+	 * Holds the existing storage type
+	 * Used to indicate (set a flag) which storage is 
+	 * preferable for current OutputFormat to write to
+	 *
+	 */
 	public static enum StorageType {
 		STORAGE_TYPE_1("1"),
 		STORAGE_TYPE_2("2"),
@@ -180,6 +223,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		this.taskNumber = taskNumber;
 		this.currentBufferNumber = 0;
 		
+		//Initialize the path (taking into account the preferable storage type)
 		path = path.suffix("/storage" + storageType.toString() + "/");
 		
 		initializePath(path);
@@ -201,6 +245,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
 				WRITE_RETRY_ATTEMPTS);
 		
+		//if the queue was already created - just reuse it
 		if (this.queue == null) {
 			this.queue = new ArrayBlockingQueue<ClovisBuffer>(BUFFER_QUEUE_CAPACITY);
 			
@@ -259,32 +304,32 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		// add the record delimiter
 		sb.append(new String(recordDelim, Charsets.UTF_8));
 		
-		if (currentBuffer == null) {
-			try {
-				currentBuffer = queue.take();
-			} catch (InterruptedException e) {
-				throw new IOException("Could not obtaine the free buffer from the system");
-			}
-		}
-		
+		//Record (bytes) to be written into the buffer
 		byte[] bytes = sb.toString().getBytes(charset);
 		
-		if (!currentBuffer.write(bytes)) {
+		if (currentBuffer == null || !currentBuffer.write(bytes)) {
 			
-			WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
-			executor.execute(task);
-			
-			currentBufferNumber++;
-			this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
+			//If the buffer is full - create a new write task
+			if (currentBuffer != null) {
+				WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
+				executor.execute(task);
+				
+				currentBufferNumber++;
+				this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
+			}
 			
 			currentBuffer = null;
 			try {
+				//Wait for a new clean buffer from the blocking queue
+				//if none available immediately - wait BUFFER_WAIT_TIMEOUT_SEC
+				//in a loop while also checking the presence of execution errors
 				while (currentBuffer == null) {
 					currentBuffer = queue.poll(BUFFER_WAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
 					if (executor.hasFailedTasks()) {
 						throw new IOException("Could not obtain the free buffer from the system");
 					}
 				}
+				currentBuffer.write(bytes);
 			} catch (InterruptedException e) {
 				throw new IOException("Could not obtain the free buffer from the system");
 			}
@@ -294,6 +339,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	@Override
 	public void close() throws IOException {
 		
+		//Create the last write task of what is in the buffer at the moment
 		if (currentBuffer != null) {
 			WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
 			executor.execute(task);
@@ -302,6 +348,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		
 		try {
 			executor.shutdown();
+			//Wait WRITE_TASKS_TERMINATION_TIMEOUT_SEC for the tasks to finish
 			executor.awaitTermination((long)WRITE_TASKS_TERMINATION_TIMEOUT_SEC, TimeUnit.SECONDS);
 			if (executor.hasFailedTasks()) {
 				throw new IOException("Buffers could not be persisted");
@@ -425,8 +472,11 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		@Override
 		public void run() {
 			try {
+				//flip the buffer to be available for writing
 				buffer.flip();
+				//write the bytes
 				stream.write(buffer.array(), 0, buffer.limit());
+				//close the stream and put the clean buffer into the blocking queue
 				cleanup();
 			} catch (Exception e) {
 				buffer.flip();

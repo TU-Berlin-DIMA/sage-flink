@@ -39,8 +39,10 @@ public class ClovisThreadPoolExecutor extends ThreadPoolExecutor {
 	public void afterExecute(Runnable r, Throwable t) {
 		super.afterExecute(r, t);
 		if (t != null) {
+			//The task failed with exception
 			ClovisAsyncTask task = (ClovisAsyncTask) r;
 			
+			//Restart task retryAttempts times
 			if (task.getRetryAttempt() > retryAttempts) {
 				try {
 					task.cleanup();
@@ -49,6 +51,8 @@ public class ClovisThreadPoolExecutor extends ThreadPoolExecutor {
 				}
 				failedTasks = true;
 			} else {
+				//Task failed retryAttempts times - set the flag that there's
+				//a failed task
 				task.setRetryAttempt(task.getRetryAttempt() + 1);
 				execute(task);
 			}

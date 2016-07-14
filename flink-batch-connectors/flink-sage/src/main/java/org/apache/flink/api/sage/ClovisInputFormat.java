@@ -63,9 +63,24 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
 	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
+	
 	private static final byte BACKSLASH = 92;
+	
+	/**
+	 * Maximum number of buffers in the read queue
+	 */
 	private static final int BUFFER_QUEUE_CAPACITY = 20;
+	
+	/**
+	 * Maximum number of times the read task will be re-scheduled upon failure
+	 */
 	private static final int READ_RETRY_ATTEMPTS = 2;
+	
+	/**
+	 * Periods the nextRecord method will wait to get the filled
+	 * buffer from the queue between checking for the presence
+	 * of failed ReadTasks
+	 */
 	private static final int BUFFER_WAIT_TIMEOUT_SEC = 5;
 	
 	private static final boolean[] EMPTY_INCLUDED = new boolean[0];
@@ -79,24 +94,49 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private Path path;
 	
+	/**
+	 * Number of buffers per one split
+	 */
 	private Integer buffersPerSplit;
 	
+	/**
+	 * CSV parsing parameters
+	 */
 	private boolean lenient;
 	private boolean quotedStringParsing = false;
 	private byte quoteCharacter;
-	
 	private transient FieldParser<?>[] fieldParsers;
 	protected transient Object[] parsedValues;
-	
 	private TupleSerializerBase<T> tupleSerializer;
-
+	
+	/**
+	 * Blocking queue with buffers already filled
+	 */
 	private transient BlockingQueue<ClovisBuffer> fullBufferQueue;
+	
+	/**
+	 * Holds clean buffers for reuse
+	 */
 	private transient LinkedList<ClovisBuffer> cleanBuffers;
+	
+	/**
+	 * Asynchronous tasks executor
+	 */
 	private transient ClovisThreadPoolExecutor executor;
 	
+	/**
+	 * The buffer this InputFormat currently reads from
+	 */
 	private transient ClovisBuffer currentBuffer;
 	
+	/**
+	 * Holds the list of paths not assigned to asynchronous tasks yet
+	 */
 	private transient Iterator<Path> splitsIterator;
+	
+	/**
+	 * Signalizes that all the splits were read
+	 */
 	private transient boolean end;
 	
 	/**
@@ -126,6 +166,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public void configure(Configuration parameters) {
 		
+		//Read parameters from configuration
 		String filePath = parameters.getString(FILE_PARAMETER_KEY, null);
 		if (filePath != null) {
 			try {
@@ -136,6 +177,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			}
 		}
 		else if (this.path == null) {
+			//should be set through setter or configuration by now
 			throw new IllegalArgumentException("File path was not specified in input format, nor configuration."); 
 		}
 		
@@ -169,7 +211,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		final Path path = this.path;
 		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(minNumSplits);
 
-		// get all the files that are involved in the splits
+		// Get the list of files/buffers in this split
 		List<FileStatus> files = new ArrayList<FileStatus>();
 
 		final FileSystem fs = path.getFileSystem();
@@ -181,6 +223,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			files.add(pathFile);
 		}
 		
+		//Compute number of splits
 		int bufferNum = files.size();
 		int numOfSplits = bufferNum/buffersPerSplit;
 		if (bufferNum % buffersPerSplit > 0) {
@@ -193,10 +236,12 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			}
 		}
 		
+		//Create splits
 		int splitNum = 0;
 		Iterator<FileStatus> it = files.iterator();
 		while (it.hasNext()) {
 			ArrayList<Path> buffers = new ArrayList<Path>(buffersPerSplit);
+			//Assure each split gets buffersPerSplit buffers, except the last one
 			for (int i = 0; i < buffersPerSplit; i++) {
 				if (it.hasNext()) {
 					buffers.add(it.next().getPath());
@@ -209,7 +254,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	}
 	
 	/**
-	 * Enumerate all files in the directory and recursive if enumerateNestedFiles is true.
+	 * Enumerate all files in the directory.
 	 * @return the total length of accepted files.
 	 */
 	private long addFilesInDir(Path path, List<FileStatus> files, boolean logExcludedFiles)
@@ -260,7 +305,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			LOG.debug("Opening input split " + split.getSplitNumber());
 		}
 		
-		// instantiate the parsers
+		// instantiate the csv field parsers - must be done in open as FileParser is not serializable
 		FieldParser<?>[] parsers = new FieldParser<?>[fieldTypes.length];
 		
 		for (int i = 0; i < fieldTypes.length; i++) {
@@ -291,14 +336,17 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			this.parsedValues[i] = fieldParsers[i].createValue();
 		}
 
+		//instantiate the ThreadPoolExecutor
 		this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
 				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
 				READ_RETRY_ATTEMPTS);
 		
+		//if fullBufferQueue was already created while reading previous InputSplit - just reuse it
 		if (fullBufferQueue == null) {
 			this.fullBufferQueue = new ArrayBlockingQueue<ClovisBuffer>(BUFFER_QUEUE_CAPACITY);
 		}
 		
+		//reuse the buffers if they were already created while reading previous InputSplit
 		if (this.cleanBuffers == null) {
 			cleanBuffers = new LinkedList<ClovisBuffer>();
 			for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
@@ -306,6 +354,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			}
 		}
 		
+		//Start BUFFER_QUEUE_CAPACITY read tasks to pre-read buffers
 		for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
 			if (splitsIterator.hasNext()) {
 				executor.execute(new ReadTask(cleanBuffers.pollLast(), fullBufferQueue, splitsIterator.next()));
@@ -323,9 +372,13 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 	@Override
 	public T nextRecord(T reuse) throws IOException {
+		//if we finished reading records from current buffer
 		if (currentBuffer == null || !currentBuffer.read(recordDelim)) {
 			try {
 				if (currentBuffer != null)  {
+					//current buffer is now available for the next read task/ 
+					//or if there are no more buffers to pre-read -- put it to clean buffers
+					//to reuse when reading next InputSplit
 					if (splitsIterator.hasNext()) {
 						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, splitsIterator.next()));
 					} else {
@@ -339,8 +392,13 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 				}
 				currentBuffer = null;
 				while (currentBuffer == null) {
+					
+					//take the buffer from the blocking queue
+					//if none available immediately - wait BUFFER_WAIT_TIMEOUT_SEC
+					//in a loop while also checking the presence of execution errors
 					currentBuffer = fullBufferQueue.poll(BUFFER_WAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
 					if (executor.hasFailedTasks()) {
+						//if there's a failed task - throw exception
 						throw new IOException("Could not fill the buffer");
 					}
 				}
@@ -358,6 +416,12 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		return reuse;
 	}
 	
+	/**
+	 * Creates an object of type T from parsed field values
+	 * @param reuse
+	 * @param parsedValues - values of the fields in the tuple
+	 * @return
+	 */
 	private T fillRecord(T reuse, Object[] parsedValues) {
 		
 		if (tupleSerializer == null)  {
@@ -377,6 +441,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		}
 	}
 	
+	/**
+	 * Set types of the fields in Tuple
+	 * @param includedMask - bitmap of the fields that should be included
+	 * @param fieldTypes
+	 */
 	public void setFields(boolean[] includedMask, Class<?>[] fieldTypes) {
 		Preconditions.checkNotNull(includedMask);
 		Preconditions.checkNotNull(fieldTypes);
@@ -466,6 +535,15 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		this.fieldTypes = types.toArray(new Class<?>[types.size()]);
 	}
 	
+	/**
+	 * Parse the byte array into fields of given types
+	 * @param holders
+	 * @param bytes
+	 * @param offset
+	 * @param numBytes
+	 * @return
+	 * @throws ParseException
+	 */
 	private boolean parseRecord(Object[] holders, byte[] bytes, int offset, int numBytes) throws ParseException {
 		
 		boolean[] fieldIncluded = this.fieldIncluded;
@@ -650,6 +728,13 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		return buffersPerSplit;
 	}
 	
+	/**
+	 * Asynchronous ReadTask
+	 * Reads the data into the given ClovisBuffer and puts it into the blocking queue
+	 * Task may be re-scheduled retryAttempt times if it fails, after that the read job 
+	 * will be stopped.
+	 *
+	 */
 	public class ReadTask implements ClovisAsyncTask {
 		
 		private BlockingQueue<ClovisBuffer> queue;
@@ -668,14 +753,19 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		@Override
 		public void run() {
 			try {
+				//Clear buffer (reset the cursor)
 				this.buffer.clear();
 				int read = this.stream.read(this.buffer.array());
 				if (read == -1) {
 					throw new RuntimeException("Buffer could not be filled");
 				} else {
+					//flip buffer (so that now it can be read from)
 					buffer.flip();
+					//set the limit to the amount of read bytes
 					buffer.setLimit(read);
+					//put into the blocking queue
 					queue.put(buffer);
+					//close the stream
 					cleanup();
 				}
 			} catch (IOException | InterruptedException e) {

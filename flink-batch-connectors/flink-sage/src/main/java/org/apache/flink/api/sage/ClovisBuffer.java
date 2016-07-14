@@ -38,6 +38,11 @@ public class ClovisBuffer {
 		byteBuffer.clear();
 	}
 	
+	/**
+	 * Write the record to the buffer
+	 * @param record
+	 * @return
+	 */
 	public boolean write(byte[] record) {
 		try {
 			byteBuffer.put(record);
@@ -47,7 +52,11 @@ public class ClovisBuffer {
 		}
 	}
 	
-	
+	/**
+	 * Read the next record from the buffer, delimited by recordDelim
+	 * @param recordDelim
+	 * @return
+	 */
 	public boolean read(byte[] recordDelim) {
 		
 		if (!byteBuffer.hasRemaining()) {
