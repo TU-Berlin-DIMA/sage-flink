@@ -29,6 +29,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.io.DefaultInputSplitAssigner;
 import org.apache.flink.api.common.io.ParseException;
 import org.apache.flink.api.common.io.RichInputFormat;
@@ -337,9 +338,12 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		}
 
 		//instantiate the ThreadPoolExecutor
-		this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
-				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
-				READ_RETRY_ATTEMPTS);
+		
+		if (executor == null || executor.isShutdown()) {
+			this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
+					TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
+					READ_RETRY_ATTEMPTS);
+		}
 		
 		//if fullBufferQueue was already created while reading previous InputSplit - just reuse it
 		if (fullBufferQueue == null) {
@@ -426,7 +430,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		
 		if (tupleSerializer == null)  {
 			TypeInformation<T> typeInfo = TypeExtractor.getForObject(reuse);
-			tupleSerializer = (TupleSerializerBase<T>) typeInfo.createSerializer(this.getRuntimeContext().getExecutionConfig());
+			tupleSerializer = (TupleSerializerBase<T>) typeInfo.createSerializer(new ExecutionConfig());
 		}
 		
 		return tupleSerializer.createOrReuseInstance(parsedValues, reuse);
