@@ -50,5 +50,11 @@ under the License.
 			<!--  <type>test-jar</type>
 			<scope>test</scope>-->
 		</dependency>
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>flink-streaming-java_2.11</artifactId>
+			<version>1.0.3</version>
+			<scope>test</scope>
+		</dependency>
 	</dependencies>
 </project>
