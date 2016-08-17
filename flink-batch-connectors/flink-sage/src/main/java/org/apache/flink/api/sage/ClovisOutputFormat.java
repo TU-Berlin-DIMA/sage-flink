@@ -27,6 +27,7 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.io.RichOutputFormat;
 import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.configuration.Configuration;
@@ -40,6 +41,20 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.base.Charsets;
 
+/**
+ * {@link OutputFormat} implementation that enables the access to the Mero Storage.  
+ * It defines how the records will be written into the particular Mero object. 
+ * It can work only with Tuple type and uses CSV data format.
+ * 
+ * On creation {@link ClovisOutputFormat} accepts the flag {@link ClovisOutputFormat#storageType}
+ * which is an indication of the preferred storage layer the object should be written to.
+ * 
+ * It writes the records into the {@link ClovisOutputFormat#currentBuffer} until it is full.
+ * When the buffer is full it initiates the asynchronous {@link WriteTask}, which persists 
+ * the buffer to the storage.
+ *
+ * @param <T> - the type of Tuple the format works with
+ */
 public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	
 	private static final long serialVersionUID = 1L;

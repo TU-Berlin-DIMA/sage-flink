@@ -21,6 +21,12 @@ package org.apache.flink.api.sage;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.InputSplit;
 
+
+/**
+ * The {@link InputSplit} implementation which works with
+ * Mero data blocks (buffers). Each input split comprises several
+ * data blocks of a particular Mero object.
+ */
 public class ClovisInputSplit implements InputSplit {
 	
 	private static final long serialVersionUID = 1L;
@@ -28,6 +34,10 @@ public class ClovisInputSplit implements InputSplit {
 	private final Path[] buffers;
 	private int num;
 	
+	/**
+	 * @param num - the number assigned to this {@link ClovisInputSplit}
+	 * @param buffers - the array comprising the addresses (ids) to each block(buffer)
+	 */
 	public ClovisInputSplit(int num, Path[] buffers) {
 		this.buffers = buffers;
 		this.num = num;

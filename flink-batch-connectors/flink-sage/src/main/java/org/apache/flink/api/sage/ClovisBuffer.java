@@ -21,6 +21,14 @@ package org.apache.flink.api.sage;
 import java.nio.BufferOverflowException;
 import java.nio.ByteBuffer;
 
+
+/**
+ * The buffer used for operating on records written to/read from
+ * {@link ClovisBuffer}. Internally, it uses the {@link ByteBuffer}, 
+ * but introduces additional method {@link ClovisBuffer#read(byte[])} 
+ * used to read records delimited by the specified delimiter.
+ *
+ */
 public class ClovisBuffer {
 	
 	public static final int BUFFER_SIZE = 1024;

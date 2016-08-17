@@ -20,6 +20,10 @@ package org.apache.flink.api.sage;
 
 import java.io.IOException;
 
+/**
+ * An interface for an asynchronous Mero I/O task.
+ *
+ */
 public interface ClovisAsyncTask extends Runnable {
 	void cleanup() throws InterruptedException, IOException;
 	int getRetryAttempt();

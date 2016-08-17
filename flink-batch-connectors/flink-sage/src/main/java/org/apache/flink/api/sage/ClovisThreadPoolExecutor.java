@@ -23,6 +23,15 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * The executor for Mero asynchronous I/O tasks.
+ * If an asynchronous task fails the executor restarts it
+ * {@link ClovisThreadPoolExecutor#retryAttempts} and if after
+ * this number of restarts the task is still not successfully executed,
+ * it sets the flag {@link ClovisThreadPoolExecutor#failedTasks} to true,
+ * which initiates the failure of entire I/O job. 
+ *
+ */
 public class ClovisThreadPoolExecutor extends ThreadPoolExecutor {
 	
 	private int retryAttempts;

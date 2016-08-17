@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.io.DefaultInputSplitAssigner;
+import org.apache.flink.api.common.io.InputFormat;
 import org.apache.flink.api.common.io.ParseException;
 import org.apache.flink.api.common.io.RichInputFormat;
 import org.apache.flink.api.common.io.statistics.BaseStatistics;
@@ -54,6 +55,19 @@ import com.google.common.base.Charsets;
 import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
 
+
+/**
+ * {@link InputFormat} implementation that enables the access to the Mero Storage. 
+ * It defines the way Mero Object will be read by multiple workers, i.e. 
+ * how the input splits will be formed and how the records will be read from each
+ * particular input split.
+ * 
+ * This implementation is working with CSV data format.
+ * 
+ * Each InputSplit comprises {@link ClovisInputFormat#buffersPerSplit} Mero data blocks.
+ *
+ * @param <T> the type of the elements this InputFormat produces
+ */
 public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private static final Logger LOG = LoggerFactory.getLogger(ClovisInputFormat.class);
