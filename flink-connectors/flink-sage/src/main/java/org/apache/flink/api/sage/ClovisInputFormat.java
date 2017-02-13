@@ -19,6 +19,7 @@
 package org.apache.flink.api.sage;
 
 import java.io.IOException;
+import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
@@ -48,12 +49,9 @@ import org.apache.flink.types.parser.FieldParser;
 import org.apache.flink.types.parser.StringParser;
 import org.apache.flink.types.parser.StringValueParser;
 import org.apache.flink.util.InstantiationUtil;
+import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import com.google.common.base.Charsets;
-import com.google.common.base.Preconditions;
-import com.google.common.primitives.Ints;
 
 
 /**
@@ -78,6 +76,12 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	
 	private static final byte[] DEFAULT_LINE_DELIMITER = {'\n'};
 	private static final byte[] DEFAULT_FIELD_DELIMITER = new byte[] {','};
+
+	// The charset used to convert strings to bytes
+	private String charsetName = "UTF-8";
+
+	// Charset is not serializable
+	private transient Charset charset;
 	
 	private static final byte BACKSLASH = 92;
 	
@@ -532,7 +536,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			}
 		}
 
-		int largestFieldIndex = Ints.max(sourceFieldIndices);
+		int largestFieldIndex = max(sourceFieldIndices);
 		this.fieldIncluded = new boolean[largestFieldIndex + 1];
 		ArrayList<Class<?>> types = new ArrayList<Class<?>>();
 
@@ -585,7 +589,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 				@SuppressWarnings("unchecked")
 				FieldParser<Object> parser = (FieldParser<Object>) this.fieldParsers[output];
 				Object reuse = holders[output];
-				startPos = parser.parseField(bytes, startPos, limit, this.fieldDelim, reuse);
+				startPos = parser.resetErrorStateAndParse(bytes, startPos, limit, this.fieldDelim, reuse);
 				holders[output] = parser.getLastResult();
 				
 				// check parse result
@@ -719,7 +723,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	}
 
 	public void setFieldDelimiter(String delimiter) {
-		this.fieldDelim = delimiter.getBytes(Charsets.UTF_8);
+		this.fieldDelim = delimiter.getBytes(getCharset());
 	}
 	
 	public void setRecordDelimiter(byte[] delimiter) {
@@ -735,7 +739,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	}
 
 	public void setRecordDelimiter(String delimiter) {
-		this.recordDelim = delimiter.getBytes(Charsets.UTF_8);
+		this.recordDelim = delimiter.getBytes(getCharset());
 	}
 	
 	public void setBuffersPerSplit(Integer buffersPerSplit) {
@@ -824,5 +828,25 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	private static final String FILE_PARAMETER_KEY = "input.file.path";
 	
 	private static final String BUFFERS_PER_SPLIT_PARAMETER_KEY = "buffers.per.split";
+
+	/*
+	*  Implementation of max function for an array of int type values
+	*/
+	private static int max(int[] ints) {
+		Preconditions.checkArgument(ints.length > 0);
+		
+		int max = ints[0];
+		for (int i = 0; i < ints.length; i++) {
+			max = Math.max(max, ints[i]);
+		}
+		return max;
+	}
+
+	public Charset getCharset() {
+		if (this.charset == null) {
+			this.charset = Charset.forName(charsetName);
+		}
+		return this.charset;
+	}
 
 }

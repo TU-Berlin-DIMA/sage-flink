@@ -23,8 +23,9 @@ under the License.
   
   <parent>
     <groupId>org.apache.flink</groupId>
-    <artifactId>flink-batch-connectors</artifactId>
-    <version>1.0.3</version>
+    <artifactId>flink-connectors</artifactId>
+    <version>1.3-SNAPSHOT</version>
+    <relativePath>..</relativePath>
   </parent>
   
   <artifactId>flink-sage</artifactId>
@@ -52,8 +53,8 @@ under the License.
 		</dependency>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
-			<artifactId>flink-streaming-java_2.11</artifactId>
-			<version>1.0.3</version>
+			<artifactId>flink-streaming-java_2.10</artifactId>
+			<version>1.3-SNAPSHOT</version>
 			<scope>test</scope>
 		</dependency>
 	</dependencies>

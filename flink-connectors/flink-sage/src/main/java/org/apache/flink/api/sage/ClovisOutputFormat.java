@@ -39,8 +39,6 @@ import org.apache.flink.types.StringValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.base.Charsets;
-
 /**
  * {@link OutputFormat} implementation that enables the access to the Mero Storage.  
  * It defines how the records will be written into the particular Mero object. 
@@ -291,7 +289,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 			Object v = element.getField(i);
 			if (v != null) {
 				if (i != 0) {
-					sb.append(new String(fieldDelim, Charsets.UTF_8));
+					sb.append(new String(fieldDelim, getCharset()));
 				}
 
 				if (quoteStrings) {
@@ -308,7 +306,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 			} else {
 				if (this.allowNullValues) {
 					if (i != 0) {
-						sb.append(new String(fieldDelim, Charsets.UTF_8));
+						sb.append(new String(fieldDelim, getCharset()));
 					}
 				} else {
 					throw new IOException("Cannot write tuple with <null> value at position: " + i);
@@ -317,7 +315,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		}
 
 		// add the record delimiter
-		sb.append(new String(recordDelim, Charsets.UTF_8));
+		sb.append(new String(recordDelim, getCharset()));
 		
 		//Record (bytes) to be written into the buffer
 		byte[] bytes = sb.toString().getBytes(charset);
@@ -450,7 +448,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	}
 
 	public void setFieldDelimiter(String delimiter) {
-		this.fieldDelim = delimiter.getBytes(Charsets.UTF_8);
+		this.fieldDelim = delimiter.getBytes(getCharset());
 	}
 	
 	public void setRecordDelimiter(byte[] delimiter) {
@@ -466,7 +464,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	}
 
 	public void setRecordDelimiter(String delimiter) {
-		this.recordDelim = delimiter.getBytes(Charsets.UTF_8);
+		this.recordDelim = delimiter.getBytes(getCharset());
 	}
 	
 	class WriteTask implements ClovisAsyncTask {
@@ -517,5 +515,12 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		public void setRetryAttempt(int retryAttempt) {
 			this.retryAttempt = retryAttempt;
 		}
+	}
+
+	public Charset getCharset() {
+		if (this.charset == null) {
+			this.charset = Charset.forName(charsetName);
+		}
+		return this.charset;
 	}
 }
