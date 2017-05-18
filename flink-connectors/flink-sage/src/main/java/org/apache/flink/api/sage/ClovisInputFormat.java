@@ -21,7 +21,6 @@ package org.apache.flink.api.sage;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -52,6 +51,7 @@ import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import sdk.clovis.ClovisAPI;
 
 
 /**
@@ -162,6 +162,39 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	 * The desired number of splits, as set by the configure() method.
 	 */
 	protected int numSplits = -1;
+
+
+
+	/*********************************
+	 * SAGE CLOVIS JAVA API PARAMETERS
+	 *********************************/
+
+	/**
+	 * Id for an Object in Mero Storage
+	 */
+	private long meroObjectId;
+
+	/**
+	 * File path for the Object in Mero Storage
+	 */
+	private String meroFilePath;
+
+	/**
+	 * Size of the byte buffer specific to Object in Mero Storage
+	 */
+	private int meroBufferSize;
+
+	/**
+	 * Number of byte buffers holding the contents of the Object in Mero Storage
+	 */
+	private int meroChunkSize;
+
+	/**
+	 * Holds the offsets off the chunks of object to be read
+	 */
+	private transient Iterator<Integer> inputSplitIterator;
+
+
 	
 	public ClovisInputFormat() {}
 	
@@ -181,11 +214,86 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		this.path = filePath;
 		this.buffersPerSplit = buffersPerSplit;
 	}
-	
+
+
+	/**
+	 * Constructor with parameters for SAGE Clovis API
+	 */
+	public ClovisInputFormat(long meroObjectId, String meroFilePath, int meroBufferSize, int meroChunkSize) {
+
+		this.meroObjectId = meroObjectId;
+		this.meroFilePath = meroFilePath;
+		this.meroBufferSize = meroBufferSize;
+		this.meroChunkSize = meroChunkSize;
+	}
+
+	public ClovisInputFormat(long meroObjectId, String meroFilePath, int meroBufferSize, int meroChunkSize, int buffersPerSplit) {
+
+		this.meroObjectId = meroObjectId;
+		this.meroFilePath = meroFilePath;
+		this.meroBufferSize = meroBufferSize;
+		this.meroChunkSize = meroChunkSize;
+		this.buffersPerSplit = buffersPerSplit;
+	}
+
+	/**
+	 * Precedence given to parameters provided in the configuration file
+	 *
+	 * Mero Object related properties should be assigned either using {@link #ClovisInputFormat(long, String, int, int)}
+	 * or the TaskConfig
+	 *
+	 * {@link #buffersPerSplit} is to be set using {@link #ClovisInputFormat(long, String, int, int, int)}, or
+	 * {@link #setBuffersPerSplit(Integer)}, or the TaskConfig
+	 *
+	 * @param parameters The configuration with all parameters (note: not the Flink config but the TaskConfig).
+	 */
 	@Override
 	public void configure(Configuration parameters) {
+
+		Long objectId = parameters.getLong(MERO_OBJECT_ID, 0L);
+		if (objectId != 0L) {
+			this.meroObjectId = objectId;
+		}
+		else if (this.meroObjectId == 0L) {
+			throw new IllegalArgumentException("Mero object ID neither specified in input format, nor in configuration file");
+		}
+
+		String filePath = parameters.getString(MERO_FILE_PATH, null);
+		if (filePath != null) {
+			this.meroFilePath = filePath;
+		}
+		else if (meroFilePath == null) {
+			throw new IllegalArgumentException("Mero object FilePath neither specified in input format, nor in configuration file");
+		}
+
+		int bufferSize = parameters.getInteger(MERO_BUFFER_SIZE, 0);
+		if (bufferSize != 0) {
+			this.meroBufferSize = bufferSize;
+		}
+		else if (meroBufferSize == 0) {
+			throw new IllegalArgumentException("Mero object BufferSize neither specified in input format, nor in configuration file");
+		}
+
+		int chunkSize = parameters.getInteger(MERO_CHUNK_SIZE, 0);
+		if (chunkSize != 0) {
+			this.meroChunkSize = chunkSize;
+		}
+		else if (meroChunkSize == 0) {
+			throw new IllegalArgumentException("Mero object ChunkSize neither specified in input format, nor in configuration file");
+		}
+
+		Integer buffPerSplit = parameters.getInteger(BUFFERS_PER_SPLIT_PARAMETER_KEY, -1);
+		if (buffPerSplit > 0) {
+			this.buffersPerSplit = buffPerSplit;
+		} else if (buffersPerSplit == null) {
+			throw new IllegalArgumentException("Number of buffers per split was not specified in input format, nor configuration.");
+		}
+
+		if (fieldTypes.length < 1) {
+			throw new IllegalArgumentException("Field types are not configured");
+		}
 		
-		//Read parameters from configuration
+		/*//Read parameters from configuration
 		String filePath = parameters.getString(FILE_PARAMETER_KEY, null);
 		if (filePath != null) {
 			try {
@@ -198,18 +306,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		else if (this.path == null) {
 			//should be set through setter or configuration by now
 			throw new IllegalArgumentException("File path was not specified in input format, nor configuration."); 
-		}
-		
-		Integer buffPerSplit = parameters.getInteger(BUFFERS_PER_SPLIT_PARAMETER_KEY, -1); 
-		if (buffPerSplit > 0) {
-			this.buffersPerSplit = buffPerSplit;
-		} else if (buffersPerSplit == null) {
-			throw new IllegalArgumentException("Number of buffers per split was not specified in input format, nor configuration.");
-		}
-		
-		if (fieldTypes.length < 1) {
-			throw new IllegalArgumentException("Field types are not configured");
-		}
+		}*/
 	}
 
 	@Override
@@ -218,6 +315,13 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		return null;
 	}
 
+	/**
+	 * TODO: Made changes to meet Clovis API specifications - InputSplit now contains an array of offset values rather than file paths.
+	 * @param minNumSplits The minimum desired number of splits. If fewer are created, some parallel
+	 *                     instances may remain idle.
+	 * @return
+	 * @throws IOException
+	 */
 	@Override
 	public ClovisInputSplit[] createInputSplits(int minNumSplits) throws IOException {
 		if (minNumSplits < 1) {
@@ -226,8 +330,39 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		
 		// take the desired number of splits into account
 		minNumSplits = Math.max(minNumSplits, this.numSplits);
+
+		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(minNumSplits);
+
+		final int chunkSize = this.meroChunkSize;
+		int numOfSplits = chunkSize/buffersPerSplit;
+		if (chunkSize % buffersPerSplit > 0) {
+			numOfSplits++;
+		}
+
+		if (numOfSplits < minNumSplits) {
+			if (LOG.isWarnEnabled()) {
+				LOG.warn("Impossible to produce" + minNumSplits + " splits");
+			}
+		}
+
+		int splitNum = 0;
+		int meroObjectOffset = 0;
+		int meroSubObjectChunkSize = 4096;
+		while (meroObjectOffset < this.meroBufferSize * this.meroChunkSize) {
+			ArrayList<Integer> buffers = new ArrayList<>(buffersPerSplit);
+			for (int i = 0; i < buffersPerSplit; i++) {
+				buffers.add(meroObjectOffset);
+				meroObjectOffset += meroSubObjectChunkSize;
+			}
+
+			ClovisInputSplit is = new ClovisInputSplit(splitNum++, buffers);
+			inputSplits.add(is);
+
+		}
+		return inputSplits.toArray(new ClovisInputSplit[inputSplits.size()]);
+
 		
-		final Path path = this.path;
+		/*final Path path = this.path;
 		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(minNumSplits);
 
 		// Get the list of files/buffers in this split
@@ -266,10 +401,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 					buffers.add(it.next().getPath());
 				}
 			}
-			ClovisInputSplit is = new ClovisInputSplit(splitNum++, buffers.toArray(new Path[buffers.size()]));
+			ClovisInputSplit is = new ClovisInputSplit(offset_buffers, splitNum++, buffers.toArray(new Path[buffers.size()]));
 			inputSplits.add(is);
 		}
-		return inputSplits.toArray(new ClovisInputSplit[inputSplits.size()]);
+		return inputSplits.toArray(new ClovisInputSplit[inputSplits.size()]);*/
 	}
 	
 	/**
@@ -318,7 +453,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public void open(ClovisInputSplit split) throws IOException {
 		
-		this.splitsIterator = Arrays.asList(split.getBuffers()).iterator();
+		//this.splitsIterator = Arrays.asList(split.getBuffers()).iterator();
+
+		this.inputSplitIterator = split.getOffset_buffers().iterator();
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Opening input split " + split.getSplitNumber());
@@ -378,8 +515,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		
 		//Start BUFFER_QUEUE_CAPACITY read tasks to pre-read buffers
 		for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
-			if (splitsIterator.hasNext()) {
+			/*if (splitsIterator.hasNext()) {
 				executor.execute(new ReadTask(cleanBuffers.pollLast(), fullBufferQueue, splitsIterator.next()));
+			}*/
+			if (inputSplitIterator.hasNext()) {
+				executor.execute(new ReadTask(cleanBuffers.pollLast(), fullBufferQueue, inputSplitIterator.next()));
 			}
 		}
 		
@@ -401,8 +541,12 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 					//current buffer is now available for the next read task/ 
 					//or if there are no more buffers to pre-read -- put it to clean buffers
 					//to reuse when reading next InputSplit
-					if (splitsIterator.hasNext()) {
-						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, splitsIterator.next()));
+
+					if (inputSplitIterator.hasNext()) {
+						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, inputSplitIterator.next()));
+
+					/*if (splitsIterator.hasNext()) {
+						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, splitsIterator.next()));*/
 					} else {
 						cleanBuffers.add(currentBuffer);
 						if (cleanBuffers.size() == BUFFER_QUEUE_CAPACITY) {
@@ -756,6 +900,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	 * Task may be re-scheduled retryAttempt times if it fails, after that the read job 
 	 * will be stopped.
 	 *
+	 * TODO: Need to add code to be able to read data from Mero. The 'buffer' should contain bytes retrived from Mero Storage
 	 */
 	public class ReadTask implements ClovisAsyncTask {
 		
@@ -763,6 +908,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		private ClovisBuffer buffer;
 		private FSDataInputStream stream;
 		private int retryAttempt;
+		private ClovisAPI clovisApi = new ClovisAPI();
+
+
+
+		int offset;
 		
 		public ReadTask(ClovisBuffer buffer, BlockingQueue<ClovisBuffer> queue, Path path) throws IOException {
 			this.queue = queue;
@@ -772,12 +922,21 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			this.retryAttempt = 0;
 		}
 
+		public ReadTask(ClovisBuffer clovisBuffer, BlockingQueue<ClovisBuffer> blockingQueue, int offset) {
+			this.queue = blockingQueue;
+			this.buffer = clovisBuffer;
+			this.offset = offset;
+			this.retryAttempt = 0;
+		}
+
 		@Override
 		public void run() {
 			try {
 				//Clear buffer (reset the cursor)
 				this.buffer.clear();
-				int read = this.stream.read(this.buffer.array());
+
+				int read = clovisApi.read(offset, this.buffer.getByteBuffer());
+				//int read = this.stream.read(this.buffer.array());
 				if (read == -1) {
 					throw new RuntimeException("Buffer could not be filled");
 				} else {
@@ -828,6 +987,16 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	private static final String FILE_PARAMETER_KEY = "input.file.path";
 	
 	private static final String BUFFERS_PER_SPLIT_PARAMETER_KEY = "buffers.per.split";
+
+
+	/**
+	 * SAGE CLOVIS JAVA API CONFIG PARAMETERS
+	 */
+
+	private static final String MERO_OBJECT_ID = "mero.object.id";
+	private static final String MERO_FILE_PATH = "mero.file.path";
+	private static final String MERO_BUFFER_SIZE = "mero.buffer.size";
+	private static final String MERO_CHUNK_SIZE = "mero.chunk.size";
 
 	/*
 	*  Implementation of max function for an array of int type values

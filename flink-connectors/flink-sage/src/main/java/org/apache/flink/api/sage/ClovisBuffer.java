@@ -122,4 +122,8 @@ public class ClovisBuffer {
 	public void setLimit(int limit) {
 		byteBuffer.limit(limit);
 	}
+
+	public ByteBuffer getByteBuffer() {
+		return this.byteBuffer;
+	}
 }

@@ -1297,4 +1297,14 @@ under the License.
 		</pluginManagement>
 	</build>
 
+	<!--CUSTOM SAGE BASED CONFIGS-->
+
+	<!--<repositories>
+		<repository>
+			<id>flink-sage-repo</id>
+			<name>Flink Sage Repositories</name>
+			<url>file:///${project.basedir}/sage-libs</url>
+		</repository>
+	</repositories>-->
+
 </project>

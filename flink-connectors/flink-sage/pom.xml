@@ -30,13 +30,13 @@ under the License.
   
   <artifactId>flink-sage</artifactId>
   <name>flink-sage</name>
-  
-  
+
+
   <url>http://maven.apache.org</url>
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
-  
+
 	<dependencies>
 		<dependency>
 			<groupId>org.apache.flink</groupId>
@@ -56,6 +56,12 @@ under the License.
 			<artifactId>flink-streaming-java_2.10</artifactId>
 			<version>1.3-SNAPSHOT</version>
 			<scope>test</scope>
+		</dependency>
+
+		<dependency>
+			<groupId>clovis</groupId>
+			<artifactId>clovis-sdk</artifactId>
+			<version>0.1</version>
 		</dependency>
 	</dependencies>
 </project>

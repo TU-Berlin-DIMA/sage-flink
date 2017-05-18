@@ -37,7 +37,7 @@ public class InputFormatTest {
 		ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 		
 		//create the input format
-		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<Tuple2<String, Integer>>(new Path("/path/to/files"));
+		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<Tuple2<String, Integer>>(new Path("/home/nouman/Downloads"));
 		
 		//define the types of the fields
 		inputFormat.setFields(String.class, Integer.class);
