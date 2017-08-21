@@ -18,7 +18,6 @@
 
 package org.apache.flink.api.sage;
 
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.InputSplit;
 
 import java.util.ArrayList;
@@ -28,47 +27,26 @@ import java.util.ArrayList;
  * The {@link InputSplit} implementation which works with
  * Mero data blocks (buffers). Each input split comprises several
  * data blocks of a particular Mero object.
- *
- * TODO: Added the offset_buffers and related methods to this class
  */
 public class ClovisInputSplit implements InputSplit {
 	
 	private static final long serialVersionUID = 1L;
 
-	//private final int[] offset_buffers;
-	private final ArrayList<Integer> offset_buffers;
+	private int splitNumber;
 
-	private final Path[] buffers;
-	private int num;
-	
-	/**
-	 * @param offset_buffers
-	 * @param num - the number assigned to this {@link ClovisInputSplit}
-	 * @param buffers - the array comprising the addresses (ids) to each block(buffer)
-	 */
-	public ClovisInputSplit(int[] offset_buffers, int num, Path[] buffers) {
-		this.buffers = buffers;
-		this.num = num;
+	private final ArrayList<Integer> meroObjectOffsets;
 
-		this.offset_buffers = null;
-	}
 
-	public ClovisInputSplit(int num, ArrayList<Integer> offset_buffers) {
-		this.offset_buffers = offset_buffers;
-		this.num = num;
+	public ClovisInputSplit(int splitNumber, ArrayList<Integer> offset_buffers) {
 
-		this.buffers = null;
+		this.splitNumber = splitNumber;
+
+		this.meroObjectOffsets = offset_buffers;
 	}
 
 	@Override
-	public int getSplitNumber() {
-		return num;
-	}
-	
-	public Path[] getBuffers() {
-		return buffers;
-	}
+	public int getSplitNumber() { return splitNumber; }
 
-	public ArrayList<Integer> getOffset_buffers() { return offset_buffers; }
+	public ArrayList<Integer> getMeroObjectOffsets() { return meroObjectOffsets; }
 	
 }

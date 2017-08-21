@@ -1,5 +1,4 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
+/* * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
  * regarding copyright ownership.  The ASF licenses this file
@@ -13,8 +12,9 @@
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+ * limitations under the License.*/
+
+
 
 package org.apache.flink.api.sage;
 
@@ -29,29 +29,41 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 /**
  * Shows how the ClovisInputFormat can be used in the streaming case
- *
- */
+ **/
+
+
 public class InputFormatStreamingTest {
-	
+
 	public static void main(String[] args) throws Exception {
-		
+
+		/**
+		 * Read would only be successful if there already exists appropriate data for the provided Mero Object Id
+		 */
+		long meroObjectId = 1048582;
+		String meroFilePath = "/tmp";
+		int meroBufferSize = 4096;
+		int meroChunkSize = 1;
+
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
 		env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
 		
 		//create input format
-		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<Tuple2<String, Integer>>(new Path("/path/to/files"));
+		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<Tuple2<String, Integer>>(meroObjectId, meroFilePath, meroBufferSize, meroChunkSize);
 		
 		//define the types of the fields
 		inputFormat.setFields(String.class, Integer.class);
 		
 		//set the number of buffers per split to be used
-		inputFormat.setBuffersPerSplit(12);
+		inputFormat.setBuffersPerSplit(1);
 		
 		//create the DataStream using given input format (requires the TypeInformation parameter)
 		TypeInformation<Tuple2<String, Integer>> typeInfo = TupleTypeInfo.getBasicTupleTypeInfo(String.class, Integer.class);
+
 		DataStream<Tuple2<String, Integer>> datastream = env.createInput(inputFormat, typeInfo);
 		
 		datastream.print();
+
 		env.execute("ClovisInputFormat Streaming Job");
 	}
 }

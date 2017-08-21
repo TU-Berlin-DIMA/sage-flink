@@ -39,21 +39,14 @@ import java.nio.ByteBuffer;
 import java.util.ArrayList;
 
 /**
- * Created by nouman on 4/25/17.
+ * TODO: Add comments
  */
 public class OperationReadObject implements Operation {
 
 	private static final Logger LOG = LoggerFactory.getLogger(OperationReadObject.class);
 
 	int offset;
-	byte[] byteArray;
 	ByteBuffer byteBuffer;
-
-	public OperationReadObject(int offset, byte[] byteArray) {
-
-		this.offset = offset;
-		this.byteArray = byteArray;
-	}
 
 	public OperationReadObject(int offset, ByteBuffer byteBuffer) {
 
@@ -61,9 +54,8 @@ public class OperationReadObject implements Operation {
 		this.byteBuffer = byteBuffer;
 	}
 
-
 	@Override
-	public int performOp(ClovisRealm clovisRealmObj, long objectId, String filePath, int bufferSize, int chunkSize) {
+	synchronized public int performOp(ClovisRealm clovisRealmObj, long objectId, String filePath, int bufferSize, int chunkSize) {
 
 		int rc = -1;
 
@@ -97,8 +89,6 @@ public class OperationReadObject implements Operation {
 		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(bufferSize, chunkSize);
 
 		ClovisBufVec attrRead = null;
-
-		System.out.println("eType: " + eType.getEntityTypeAddress() + " -- Object Id: " + objectId + " -- objId: " + objId.getLow());
 
 		// APIs to create an object
 		rc = callNativeApis.m0ClovisObjInit(eType, clovisRealmObj, objId);
@@ -213,18 +203,19 @@ public class OperationReadObject implements Operation {
 			return -1;
 		}
 
-		byte[] result;
-		ByteBuffer buffer = null;
-		byte[] temp;
-		int i = 0;
-
 		for (ByteBuffer buff: dataRead) {
 			this.byteBuffer.put(buff);
-			/*temp = buff.array();
-			for (byte b: temp) {
-				byteArray[i++] = b;
-			}*/
 		}
-		return i;
+
+		int limit = 0;
+		for (Byte b: this.byteBuffer.array()) {
+			if (b == 0) {
+				break;
+			} else {
+				limit++;
+			}
+		}
+
+		return limit;
 	}
 }

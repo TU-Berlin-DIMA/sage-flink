@@ -18,6 +18,17 @@
 
 package org.apache.flink.api.sage;
 
+import org.apache.flink.api.common.io.OutputFormat;
+import org.apache.flink.api.common.io.RichOutputFormat;
+import org.apache.flink.api.java.tuple.Tuple;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.core.fs.FileSystem.WriteMode;
+import org.apache.flink.types.StringValue;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import sdk.clovis.ClovisAPI;
+import sdk.clovis.config.ClovisClusterProps;
+
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
@@ -26,18 +37,6 @@ import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.TimeUnit;
-
-import org.apache.flink.api.common.io.OutputFormat;
-import org.apache.flink.api.common.io.RichOutputFormat;
-import org.apache.flink.api.java.tuple.Tuple;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.core.fs.FSDataOutputStream;
-import org.apache.flink.core.fs.FileSystem;
-import org.apache.flink.core.fs.Path;
-import org.apache.flink.core.fs.FileSystem.WriteMode;
-import org.apache.flink.types.StringValue;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * {@link OutputFormat} implementation that enables the access to the Mero Storage.  
@@ -85,8 +84,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	 */
 	private static final int BUFFER_WAIT_TIMEOUT_SEC = 5;
 	
-	private Path path;
-	
 	/**
 	 * The preferable storage type for this OutputFormat
 	 */
@@ -108,11 +105,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	 */
 	private int currentBufferNumber;
 	
-	/**
-	 * The path (i.e. Object name) written into
-	 */
-	private transient Path actualFilePath;
-	
 	private String charsetName;
 	
 	private transient Charset charset;
@@ -128,6 +120,14 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	 * The buffer we currently write to
 	 */
 	private transient ClovisBuffer currentBuffer;
+
+	/**
+	 * Mero Object Properties
+	 */
+	private long meroObjectId;
+	private String meroFilePath;
+	private int meroBufferSize;
+	private int meroChunkSize;
 	
 	/**
 	 * Holds the existing storage type
@@ -165,41 +165,32 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		}
 	}
 	
-	/**
-	 * The key under which the name of the target path is stored in the configuration. 
-	 */
-	public static final String FILE_PARAMETER_KEY = "flink.output.file";
-	
 	public static final String STORAGE_TYPE_PARAMETER_KEY = "storage.type";
-	
-	public ClovisOutputFormat() {}
-	
-	public ClovisOutputFormat(Path path) {
-		this.setPath(path);
+
+	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBufferSize, int meroChunkSize) {
+
+		this.meroObjectId = meroObjectId;
+		this.meroFilePath = meroFilePath;
+		this.meroBufferSize = meroBufferSize;
+		this.meroChunkSize = meroChunkSize;
 	}
 
-	public ClovisOutputFormat(Path path, StorageType storageType) {
-		this.setPath(path);
-		this.setStorageType(storageType);
-	}
-	
-	public ClovisOutputFormat(StorageType storageType) {
+	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBufferSize, int meroChunkSize, StorageType storageType) {
+
+		this.meroObjectId = meroObjectId;
+		this.meroFilePath = meroFilePath;
+		this.meroBufferSize = meroBufferSize;
+		this.meroChunkSize = meroChunkSize;
+
 		this.setStorageType(storageType);
 	}
 
+	/**
+	 * @param parameters The configuration with all parameters.
+	 */
 	@Override
 	public void configure(Configuration parameters) {
-		if (path == null) {
-			String filePath = parameters.getString(FILE_PARAMETER_KEY, null);
-			
-			if (filePath == null) {
-				throw new IllegalArgumentException("The output path has been specified neither via constructor/setters" +
-						", nor via the Configuration.");
-			}
-			
-			path = new Path(filePath);
-		}
-		
+
 		if (storageType == null) {
 			storageType = StorageType.fromString(parameters.getString(STORAGE_TYPE_PARAMETER_KEY, DEFAULT_STORAGE_TYPE.toString()));
 			if (storageType == null) {
@@ -214,17 +205,33 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		if (charsetName == null) {
 			charsetName = "UTF-8";
 		}
-	}
-	
-	private void initializePath(Path path) throws IOException {
-		FileSystem fs = path.getFileSystem();
-		// if this is a local file system, we need to initialize the local output directory here
-		if (!fs.isDistributedFS()) {
-			if(!fs.initOutPathLocalFS(path, writeMode, true)) {
-				// output preparation failed! Cancel task.
-				throw new IOException("Output directory '" + path.toString() + "' could not be created. Canceling task...");
-			}
-		}
+
+		/**
+		 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProps ()} will be overridden
+		 */
+		boolean ooStore = parameters.getBoolean(OO_STORE, false);
+		ClovisClusterProps.setOoStore(ooStore);
+
+		int clovisLayoutId = parameters.getInteger(CLOVIS_LAYOUT_ID, -1);
+		if (clovisLayoutId > 0) { ClovisClusterProps.setClovisLayoutId(clovisLayoutId); }
+
+		String clovisLocalEndpoint = parameters.getString(CLOVIS_LOCAL_ENDPOINT, null);
+		if (clovisLocalEndpoint != null) { ClovisClusterProps.setClovisLocalEndpoint(clovisLocalEndpoint); }
+
+		String clovisHaEndpoint = parameters.getString(CLOVIS_HA_ENDPOINT, null);
+		if (clovisHaEndpoint != null) { ClovisClusterProps.setClovisHaEndpoint(clovisHaEndpoint); }
+
+		String clovisConfdEndpoint = parameters.getString(CLOVIS_CONFD_ENDPOINT, null);
+		if (clovisConfdEndpoint != null) { ClovisClusterProps.setClovisConfdEndpoint(clovisConfdEndpoint); }
+
+		String clovisProf = parameters.getString(CLOVIS_PROF, null);
+		if (clovisProf != null) { ClovisClusterProps.setClovisProf(clovisProf); }
+
+		String clovisProfId = parameters.getString(CLOVIS_PROF_ID, null);
+		if (clovisProfId != null) { ClovisClusterProps.setClovisProfId(clovisProfId); }
+
+		String clovisIndexDir = parameters.getString(CLOVIS_INDEX_DIR, null);
+		if (clovisIndexDir != null) { ClovisClusterProps.setClovisIndexDir(clovisIndexDir); }
 	}
 
 	@Override
@@ -237,9 +244,9 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		this.currentBufferNumber = 0;
 		
 		//Initialize the path (taking into account the preferable storage type)
-		path = path.suffix("/storage" + storageType.toString() + "/");
+		//path = path.suffix("/storage" + storageType.toString() + "/");
 		
-		initializePath(path);
+		//initializePath(path);
 		
 		try {
 			this.charset = Charset.forName(charsetName);
@@ -252,7 +259,7 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		}
 		
 		// Suffix the path with the parallel instance index, if needed
-		this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
+		//this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
 
 		this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
 				TimeUnit.SECONDS, new SynchronousQueue<Runnable>(),
@@ -263,15 +270,12 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 			this.queue = new ArrayBlockingQueue<ClovisBuffer>(BUFFER_QUEUE_CAPACITY);
 			
 			for (int i = 0; i < BUFFER_QUEUE_CAPACITY; i++) {
-				queue.add(new ClovisBuffer());
+				/**
+				 * TODO: Pass the correct buffer size
+				 */
+				queue.add(new ClovisBuffer(meroBufferSize));
 			}
 		}
-	}
-	
-	private String getFileName(int taskNumber, int currentBufferNumber) {
-		StringBuilder sb = new StringBuilder("/(");
-		sb.append(taskNumber).append(",").append(currentBufferNumber).append(")");
-		return sb.toString();
 	}
 
 	@Override
@@ -324,11 +328,12 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 			
 			//If the buffer is full - create a new write task
 			if (currentBuffer != null) {
-				WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
+				//WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
+				WriteTask task = new WriteTask(currentBuffer, queue);
 				executor.execute(task);
 				
 				currentBufferNumber++;
-				this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
+				//this.actualFilePath = path.suffix(getFileName(taskNumber, currentBufferNumber));
 			}
 			
 			currentBuffer = null;
@@ -354,7 +359,8 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		
 		//Create the last write task of what is in the buffer at the moment
 		if (currentBuffer != null) {
-			WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
+			//WriteTask task = new WriteTask(currentBuffer, queue, actualFilePath);
+			WriteTask task = new WriteTask(currentBuffer, queue);
 			executor.execute(task);
 			currentBuffer = null;
 		}
@@ -381,17 +387,6 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 
 	public void setStorageType(StorageType storageType) {
 		this.storageType = storageType;
-	}
-
-	public Path getPath() {
-		return path;
-	}
-
-	public void setPath(Path path) {
-		if (path == null) {
-			throw new NullPointerException();
-		}
-		this.path = path;
 	}
 	
 	public WriteMode getWriteMode() {
@@ -466,46 +461,46 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 	public void setRecordDelimiter(String delimiter) {
 		this.recordDelim = delimiter.getBytes(getCharset());
 	}
-	
+
 	class WriteTask implements ClovisAsyncTask {
 		
 		private BlockingQueue<ClovisBuffer> queue;
 		private ClovisBuffer buffer;
-		private FSDataOutputStream stream;
 		private int retryAttempt;
-		
-		public WriteTask(ClovisBuffer buffer, BlockingQueue<ClovisBuffer> queue, Path path) throws IOException {
+
+		public WriteTask(ClovisBuffer buffer, BlockingQueue<ClovisBuffer> queue) throws IOException {
 			this.queue = queue;
 			this.buffer = buffer;
-			FileSystem fs = path.getFileSystem();
-			this.stream = fs.create(path, writeMode == WriteMode.OVERWRITE);
 			setRetryAttempt(0);
 		}
 
 		@Override
 		public void run() {
 			try {
+				ClovisAPI clovisAPI = new ClovisAPI();
+
+				clovisAPI.create(meroObjectId, meroFilePath, meroBufferSize, meroChunkSize);
+
 				//flip the buffer to be available for writing
 				buffer.flip();
+
 				//write the bytes
-				stream.write(buffer.array(), 0, buffer.limit());
+				clovisAPI.write(buffer.array(), meroObjectId, meroFilePath, meroBufferSize, 1);
+
 				//close the stream and put the clean buffer into the blocking queue
 				cleanup();
+
 			} catch (Exception e) {
+
 				buffer.flip();
+
 				throw new RuntimeException(e);
 			}
-			
 		}
 		
 		public void cleanup() throws InterruptedException, IOException {
 			buffer.clear();
 			queue.put(buffer);
-			final FSDataOutputStream s = this.stream;
-			if (s != null) {
-				this.stream = null;
-				s.close();
-			}
 		}
 
 		public int getRetryAttempt() {
@@ -517,6 +512,22 @@ public class ClovisOutputFormat<T extends Tuple> extends RichOutputFormat<T> {
 		}
 	}
 
+	/**
+	 * ------------------------------------- Config Keys ------------------------------------------
+	 */
+
+	private static final String OO_STORE = "clovis.object-store";
+	private static final String CLOVIS_LAYOUT_ID = "clovis.layout-id";
+	private static final String CLOVIS_LOCAL_ENDPOINT = "clovis.local-endpoint";
+	private static final String CLOVIS_HA_ENDPOINT = "clovis.ha-endpoint";
+	private static final String CLOVIS_CONFD_ENDPOINT = "clovis.confd-endpoint";
+	private static final String CLOVIS_PROF = "clovis.prof";
+	private static final String CLOVIS_PROF_ID = "clovis.prof-id";
+	private static final String CLOVIS_INDEX_DIR = "clovis.index-dir";
+
+	/**
+	 * Utility Methods
+	 */
 	public Charset getCharset() {
 		if (this.charset == null) {
 			this.charset = Charset.forName(charsetName);

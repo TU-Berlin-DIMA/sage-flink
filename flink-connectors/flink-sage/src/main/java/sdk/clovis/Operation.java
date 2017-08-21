@@ -20,10 +20,6 @@ package sdk.clovis;
 
 import com.clovis.jni.pojo.ClovisRealm;
 
-/**
- * Created by nouman on 4/3/17.
- */
-
 public interface Operation {
 	int performOp (ClovisRealm clovisRealmObject, long objectId, String filePath, int bufferSize, int chunkSize);
 }

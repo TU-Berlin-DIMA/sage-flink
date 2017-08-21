@@ -31,14 +31,12 @@ import java.nio.ByteBuffer;
  */
 public class ClovisBuffer {
 	
-	public static final int BUFFER_SIZE = 1024;
-	
 	private ByteBuffer byteBuffer;
-	private transient int currOffset;			// offset in above buffer
-	private transient int currLen;				// length of current byte sequence
+	private transient int currOffset;
+	private transient int currLen;
 	
-	public ClovisBuffer() {
-		byte[] bytes = new byte[BUFFER_SIZE];
+	public ClovisBuffer(int bufferSize) {
+		byte[] bytes = new byte[bufferSize];
 		this.byteBuffer = ByteBuffer.wrap(bytes);
 	}
 	

@@ -36,29 +36,44 @@ import org.apache.flink.util.Collector;
 public class OutputFormatStreamingTest {
 	
 	public static void main(String[] args) throws Exception {
+
+		long meroObjectId = 1048582;
+		String meroFilePath = "/tmp";
+		int meroBufferSize = 4096;
+		int meroChunkSize = 1;
 	
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
 		env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
 		
 		//read some random file and produce tuples out of it
-		DataStream<Tuple2<String, Integer>> text = env.readTextFile("/path/to/some/random/file/").flatMap(new LineSplitter());
+		DataStream<Tuple2<String, Integer>> text = env
+			.fromElements("This,0\n" + "is,1\n" + "some,2\n" + "test,3\n" + "data,4\n")
+			.flatMap(new TupleGenerator());
 		
 		//create the output format, indicate the preferred storage type
-		ClovisOutputFormat<Tuple2<String, Integer>> out = new ClovisOutputFormat<Tuple2<String, Integer>>(new Path("output/folder/path"), StorageType.STORAGE_TYPE_1);
-		out.setWriteMode(WriteMode.OVERWRITE);
-	    text.writeUsingOutputFormat(out);
+		ClovisOutputFormat<Tuple2<String, Integer>> outputFormat = new ClovisOutputFormat<Tuple2<String, Integer>>(meroObjectId, meroFilePath, meroBufferSize, meroChunkSize);
+
+		outputFormat.setWriteMode(WriteMode.OVERWRITE);
+
+		text.writeUsingOutputFormat(outputFormat);
 
 	    env.execute("ClovisOutputFormat Streaming Job");
 	}
-	
-	public static class LineSplitter implements FlatMapFunction<String, Tuple2<String, Integer>> {
+
+	public static class TupleGenerator implements FlatMapFunction<String, Tuple2<String, Integer>> {
 
 		private static final long serialVersionUID = 1L;
 
-		public void flatMap(String line, Collector<Tuple2<String, Integer>> out) {
-            for (String word : line.split(",|\\|")) {
-                out.collect(new Tuple2<String, Integer>(word, 1));
-            }
-        }
-    }
+		public void flatMap(String input, Collector<Tuple2<String, Integer>> out) {
+
+			String[] lines = input.split("\n");
+
+			for (String line: lines) {
+				String[] fileds = line.split(",");
+				Tuple2<String, Integer> tuple = new Tuple2(fileds[0], Integer.parseInt(fileds[1]));
+				out.collect(tuple);
+			}
+		}
+	}
 }
