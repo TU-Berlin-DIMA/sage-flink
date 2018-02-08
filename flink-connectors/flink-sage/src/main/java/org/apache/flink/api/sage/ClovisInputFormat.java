@@ -18,6 +18,7 @@
 
 package org.apache.flink.api.sage;
 
+import com.clovis.jni.pojo.ClovisBufVec;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.io.DefaultInputSplitAssigner;
 import org.apache.flink.api.common.io.InputFormat;
@@ -40,6 +41,7 @@ import sdk.clovis.ClovisAPI;
 import sdk.clovis.config.ClovisClusterProps;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -123,7 +125,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	/**
 	 * Blocking queue with buffers already filled
 	 */
-	private transient BlockingQueue<ClovisBuffer> fullBufferQueue;
+	private transient LinkedList<ClovisBuffer> fullBufferQueue;
 	
 	/**
 	 * Holds clean buffers for reuse
@@ -133,12 +135,16 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	/**
 	 * Asynchronous tasks executor
 	 */
-	private transient ClovisThreadPoolExecutor executor;
+	// private transient ClovisThreadPoolExecutor executor;
+	ClovisReader clovisReader;
 	
 	/**
 	 * The buffer this InputFormat currently reads from
 	 */
-	private transient ClovisBuffer currentBuffer;
+	private transient ClovisBufVec currentData;
+	private transient Iterator<ByteBuffer> dataIterator;
+	private transient ByteBuffer currentBuffer;
+	private transient int currentBufferOffset;
 	
 	/**
 	 * Signalizes that all the splits were read
@@ -337,6 +343,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			this.parsedValues[i] = fieldParsers[i].createValue();
 		}
 
+		clovisReader = new ClovisReader();
+		clovisReader.open();
+
 		//instantiate the ThreadPoolExecutor
 		if (executor == null || executor.isShutdown()) {
 			this.executor = new ClovisThreadPoolExecutor(0, Integer.MAX_VALUE, 60L,
@@ -376,46 +385,29 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public T nextRecord(T reuse) throws IOException {
 		//if we finished reading records from current buffer
-		if (currentBuffer == null || !currentBuffer.read(recordDelim)) {
-			try {
-				if (currentBuffer != null)  {
-					//current buffer is now available for the next read task/ 
-					//or if there are no more buffers to pre-read -- put it to clean buffers
-					//to reuse when reading next InputSplit
+		if (currentData == null || !dataIterator.hasNext()) {
+			if (currentData != null)  {
+				//current buffer is now available for the next read task/
+				//or if there are no more buffers to pre-read -- put it to clean buffers
+				//to reuse when reading next InputSplit
 
-					if (inputSplitIterator.hasNext()) {
-						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, inputSplitIterator.next()));
-
-					/*if (splitsIterator.hasNext()) {
-						executor.execute(new ReadTask(currentBuffer, fullBufferQueue, splitsIterator.next()));*/
-					} else {
-						cleanBuffers.add(currentBuffer);
-						if (cleanBuffers.size() == BUFFER_QUEUE_CAPACITY) {
-							currentBuffer = null;
-							end = true;
-							return null;
-						}
-					}
+				if (inputSplitIterator.hasNext()) {
+					clovisReader.scheduleRead(inputSplitIterator.next());
+//					executor.execute(new ReadTask(currentBuffer, fullBufferQueue, inputSplitIterator.next()));
 				}
-				currentBuffer = null;
-				while (currentBuffer == null) {
-					
-					//take the buffer from the blocking queue
-					//if none available immediately - wait BUFFER_WAIT_TIMEOUT_SEC
-					//in a loop while also checking the presence of execution errors
-					currentBuffer = fullBufferQueue.poll(BUFFER_WAIT_TIMEOUT_SEC, TimeUnit.SECONDS);
-					if (executor.hasFailedTasks()) {
-						//if there's a failed task - throw exception
-						throw new IOException("Could not fill the buffer");
-					}
-				}
-				return nextRecord(reuse);
-			} catch (InterruptedException e) {
-				throw new IOException("Could not fill the buffer");
 			}
+
+			clovisReader.freeBuffer(currentData);
+			currentData = clovisReader.getNextBuffer();
+			dataIterator = currentData.iterator();
+			currentBuffer = dataIterator.next();
+			currentBufferOffset = 0;
+		} else if (currentBuffer.limit() <= currentBufferOffset) {
+			currentBuffer = dataIterator.next();
+			currentBufferOffset = 0;
 		}
 		
-		if (parseRecord(parsedValues, currentBuffer.array(), currentBuffer.getCurrentOffset(), currentBuffer.getCurrentLength())) {
+		if (parseRecord(parsedValues, currentBuffer.array(), currentBufferOffset, currentBuffer.limit() - currentBufferOffset)) {
 			fillRecord(reuse, parsedValues);
 		} else {
 			return null;
@@ -438,13 +430,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		
 		return tupleSerializer.createOrReuseInstance(parsedValues, reuse);
 	}
-	
 
 	@Override
 	public void close() throws IOException {
-		executor.shutdown();
-		if (executor.hasFailedTasks()) {
-			throw new IOException("Read was not successful");
+		if (currentBuffer != null) {
+			clovisReader.freeBuffer(currentData);
 		}
 	}
 	
