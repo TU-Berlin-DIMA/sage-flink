@@ -3,7 +3,19 @@ package org.apache.flink.api.sage;
 import com.clovis.jni.enums.ClovisEntityType;
 import com.clovis.jni.enums.ClovisObjOpCode;
 import com.clovis.jni.enums.ClovisOpState;
-import com.clovis.jni.pojo.*;
+import com.clovis.jni.enums.ClovisRealmType;
+import com.clovis.jni.exceptions.ClovisInvalidParametersException;
+import com.clovis.jni.pojo.ClovisObjId;
+import com.clovis.jni.pojo.ClovisRealm;
+import com.clovis.jni.pojo.EntityType;
+import com.clovis.jni.pojo.ClovisOp;
+import com.clovis.jni.pojo.ClovisBufVec;
+import com.clovis.jni.pojo.ClovisIndexVec;
+import com.clovis.jni.pojo.EntityTypeFactory;
+import com.clovis.jni.pojo.RealmType;
+import com.clovis.jni.pojo.RealmTypeFactory;
+import com.clovis.jni.pojo.ClovisInstance;
+import com.clovis.jni.pojo.ClovisConf;
 import com.clovis.jni.startup.ClovisJavaApis;
 import com.clovis.jni.utils.TimeUtils;
 
@@ -15,7 +27,12 @@ import java.util.ArrayList;
  */
 public class ClovisReader {
 
-	ClovisRealm clovisRealmObj;
+	private RealmType rType = RealmTypeFactory.getRealmType(ClovisRealmType.CLOVIS_CONTAINER);
+	private ClovisConf conf;
+	private ClovisInstance clovisInstance;
+	private static ClovisJavaApis clovisJavaApis;
+
+	private ClovisRealm clovisRealmObj;
 	private ClovisJavaApis callNativeApis;
 	private EntityType eType;
 	private ClovisObjId objId;
@@ -27,8 +44,17 @@ public class ClovisReader {
 	private int bufferSize;
 	private int chunkSize;
 
-	public void open(ClovisRealm clovisRealmObj, long objectId, int bufferSize, int chunkSize) {
-		this.clovisRealmObj = clovisRealmObj;
+	ClovisReader() {
+
+		this.clovisJavaApis = new ClovisJavaApis();
+		this.conf = new ClovisConf();
+		this.clovisInstance = new ClovisInstance();
+		this.clovisRealmObj = new ClovisRealm();
+
+	}
+
+	public void open(long objectId, int bufferSize, int chunkSize) throws IOException {
+
 		this.bufferSize = bufferSize;
 		this.chunkSize = chunkSize;
 
@@ -39,12 +65,38 @@ public class ClovisReader {
 		objId.setHi(0);
 		objId.setLow(objectId);
 
-		opList = new ArrayList<ClovisOp>();
-		readDataBufferList = new ArrayList<ClovisBufVec>();
+		opList = new ArrayList<>();
+		readDataBufferList = new ArrayList<>();
+
+		if (initializeClovis(conf, clovisInstance) != 0) {
+			throw new IOException("Failed to initialize Clovis");
+		}
+
+		if (initializeContainer(rType, clovisRealmObj, objId, clovisInstance) != 0) {
+			throw new IOException("Failed to initialize Clovis container");
+		}
 
 		clovisOpStates = new ClovisOpState[2];
 		clovisOpStates[0] = ClovisOpState.M0_CLOVIS_OS_STABLE;
 		clovisOpStates[1] = ClovisOpState.M0_CLOVIS_OS_FAILED;
+	}
+
+	public void close() {
+
+	}
+
+	private int initializeContainer(RealmType rType, ClovisRealm clovisRealmObject, ClovisObjId clovisObjectId, ClovisInstance instance) {
+		return clovisJavaApis.m0ClovisContainerInit(rType, clovisRealmObject, clovisObjectId, instance);
+	}
+
+	private static int initializeClovis(ClovisConf conf, ClovisInstance instance) {
+		// TODO: segfaults because conf variable not properly initialized. Probably need configuration properties from ClovisInputFormat
+		try {
+			return clovisJavaApis.m0ClovisInit(conf, instance);
+		} catch (ClovisInvalidParametersException e) {
+			e.printStackTrace();
+		}
+		return -1;
 	}
 
 	public void scheduleRead(int offset) throws IOException {
