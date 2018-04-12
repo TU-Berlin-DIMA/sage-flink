@@ -16,11 +16,17 @@ import com.clovis.jni.pojo.RealmType;
 import com.clovis.jni.pojo.RealmTypeFactory;
 import com.clovis.jni.pojo.ClovisInstance;
 import com.clovis.jni.pojo.ClovisConf;
+//import com.clovis.jni.pojo.ClovisEntity;
 import com.clovis.jni.startup.ClovisJavaApis;
 import com.clovis.jni.utils.TimeUtils;
+import com.clovis.jni.utils.StatusCodes;
+import sdk.clovis.config.ClovisClusterProps;
 
 import java.io.IOException;
 import java.util.ArrayList;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Created by Clemens Lutz on 11/27/17.
@@ -30,7 +36,6 @@ public class ClovisReader {
 	private RealmType rType = RealmTypeFactory.getRealmType(ClovisRealmType.CLOVIS_CONTAINER);
 	private ClovisConf conf;
 	private ClovisInstance clovisInstance;
-	private static ClovisJavaApis clovisJavaApis;
 
 	private ClovisRealm clovisRealmObj;
 	private ClovisJavaApis callNativeApis;
@@ -44,21 +49,50 @@ public class ClovisReader {
 	private int bufferSize;
 	private int chunkSize;
 
-	ClovisReader() {
+	private static final Logger LOG = LoggerFactory.getLogger(ClovisReader.class);
 
-		this.clovisJavaApis = new ClovisJavaApis();
+	ClovisReader(/*ClovisConf conf, ClovisInstance instance */) throws IOException {
+
+		this.callNativeApis = new ClovisJavaApis();
 		this.conf = new ClovisConf();
 		this.clovisInstance = new ClovisInstance();
 		this.clovisRealmObj = new ClovisRealm();
 
+		setDefaultConfValues(this.conf);
+		try {
+			if (callNativeApis.m0ClovisInit(conf, clovisInstance) != StatusCodes.SUCCESS) {
+				throw new IOException("Failed to initialize Clovis");
+			}
+		} catch (ClovisInvalidParametersException e) {
+			e.printStackTrace();
+			throw new IOException();
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new IOException();
+		}
+	}
+
+	private static void setDefaultConfValues(ClovisConf conf) {
+
+		conf.setOoStore(ClovisClusterProps.getOoStore());
+		conf.setClovisLayoutId(ClovisClusterProps.getClovisLayoutId());
+		conf.setClovisLocalAddr(ClovisClusterProps.getClovisLocalEndpoint());
+		conf.setClovisHaAddr(ClovisClusterProps.getClovisHaEndpoint());
+		conf.setClovisConfdAddr(ClovisClusterProps.getClovisConfdEndpoint());
+		conf.setClovisProf(ClovisClusterProps.getClovisProf());
+		conf.setClovisProfFid(ClovisClusterProps.getClovisProfId());
+		conf.setClovisIndexDir(ClovisClusterProps.getClovisIndexDir());
 	}
 
 	public void open(long objectId, int bufferSize, int chunkSize) throws IOException {
 
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Open object " + objectId + " with buffer size " + bufferSize + " and chunk size " + chunkSize);
+		}
+
 		this.bufferSize = bufferSize;
 		this.chunkSize = chunkSize;
 
-		callNativeApis = new ClovisJavaApis();
 		eType = EntityTypeFactory.getEntityType(ClovisEntityType.CLOVIS_OBJ);
 
 		objId = new ClovisObjId();
@@ -68,12 +102,21 @@ public class ClovisReader {
 		opList = new ArrayList<>();
 		readDataBufferList = new ArrayList<>();
 
-		if (initializeClovis(conf, clovisInstance) != 0) {
-			throw new IOException("Failed to initialize Clovis");
+//		NOTE: try to initializeClovis in Constructor. Remove this if it works and doesn't segfault
+//		if (initializeClovis(conf, clovisInstance) != 0) {
+//			throw new IOException("Failed to initialize Clovis");
+//		}
+
+		if (callNativeApis.m0ClovisContainerInit(rType, clovisRealmObj, objId, clovisInstance) != 0) {
+			throw new IOException("Failed to initialize Clovis container");
 		}
 
-		if (initializeContainer(rType, clovisRealmObj, objId, clovisInstance) != 0) {
-			throw new IOException("Failed to initialize Clovis container");
+		eType = EntityTypeFactory.getEntityType(ClovisEntityType.CLOVIS_OBJ);
+
+		int rc;
+		rc = callNativeApis.m0ClovisObjInit(eType, clovisRealmObj, objId);
+		if (rc != StatusCodes.SUCCESS) {
+			throw new IOException("Read : m0ClovisObjInit() call fails rc = " + rc);
 		}
 
 		clovisOpStates = new ClovisOpState[2];
@@ -81,27 +124,23 @@ public class ClovisReader {
 		clovisOpStates[1] = ClovisOpState.M0_CLOVIS_OS_FAILED;
 	}
 
-	public void close() {
+	public void close() throws IOException {
+		int rc;
 
-	}
-
-	private int initializeContainer(RealmType rType, ClovisRealm clovisRealmObject, ClovisObjId clovisObjectId, ClovisInstance instance) {
-		return clovisJavaApis.m0ClovisContainerInit(rType, clovisRealmObject, clovisObjectId, instance);
-	}
-
-	private static int initializeClovis(ClovisConf conf, ClovisInstance instance) {
-		// TODO: segfaults because conf variable not properly initialized. Probably need configuration properties from ClovisInputFormat
-		try {
-			return clovisJavaApis.m0ClovisInit(conf, instance);
-		} catch (ClovisInvalidParametersException e) {
-			e.printStackTrace();
+		rc = callNativeApis.m0ClovisObjFini(eType);
+		if (rc != StatusCodes.SUCCESS) {
+			throw new IOException("Read : m0ClovisObjFini() call fails rc = " + rc);
 		}
-		return -1;
+
 	}
 
 	public void scheduleRead(int offset) throws IOException {
 
-		int rc = -1;
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Scheduled read with offset " + offset);
+		}
+
+		int rc;
 
 		ClovisIndexVec extRead = callNativeApis.m0IndexvecAlloc(chunkSize);
 		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(bufferSize, chunkSize);
@@ -114,66 +153,92 @@ public class ClovisReader {
 			extRead.getOffSetArray()[i] = bufferSize;
 		}
 
-		eType = EntityTypeFactory.getEntityType(ClovisEntityType.CLOVIS_OBJ);
-
-		rc = callNativeApis.m0ClovisObjInit(eType, clovisRealmObj, objId);
-		if (rc != 0) {
-			throw new IOException("Read : m0ClovisObjInit() call fails rc = " + rc);
-		}
-
 		ClovisOp clovisOp = new ClovisOp();
+
+//		ClovisEntity entity = new ClovisEntity();
+//		rc = callNativeApis.m0ClovisEntityCreate(eType, entity, clovisOp);
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisEntityCreate() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisOpLaunch(opList, opList.size());
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisOpLaunch() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisOpWait(clovisOp, clovisOpStates, TimeUtils.M0_TIME_NEVER);
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisOpWait() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisOpStatus(clovisOp);
+//		if (rc != 0 && rc != -17) {
+//			throw new IOException("Read : m0ClovisOpStatus() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisOpFini(clovisOp);
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisOpFini() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisOpFree(clovisOp);
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisOpFree() call fails rc = " + rc);
+//		}
+//
+//		rc = callNativeApis.m0ClovisObjFini(eType);
+//		if (rc != 0) {
+//			throw new IOException("Read : m0ClovisObjFini() call fails rc = " + rc);
+//		}
+//
+//		clovisOp = new ClovisOp();
 
 		rc = callNativeApis.m0ClovisObjOp(
 			eType, ClovisObjOpCode.M0_CLOVIS_OC_READ, extRead, dataRead, attrRead, 0, clovisOp);
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisObjOp() call fails rc = " + rc);
 		}
 
 		opList.add(clovisOp);
-		readDataBufferList.add(dataRead);
-
 		rc = callNativeApis.m0ClovisOpLaunch(opList, opList.size());
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisOpLaunch() call fails rc = " + rc);
 		}
 
+		readDataBufferList.add(dataRead);
 	}
 
 	public ClovisBufVec getNextBuffer() throws IOException {
 
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Get next ClovisBufVec");
+		}
+
 		int rc = -1;
-		long timeUtils = TimeUtils.M0_TIME_NEVER;
 
 		ClovisOp clovisOp = opList.get(0);
+		opList.remove(0);
 		ClovisBufVec dataRead = readDataBufferList.get(0);
 
-		rc = callNativeApis.m0ClovisOpWait(clovisOp, clovisOpStates, timeUtils);
-		if (rc != 0) {
+		rc = callNativeApis.m0ClovisOpWait(clovisOp, clovisOpStates, TimeUtils.M0_TIME_NEVER);
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisOpWait() call fails rc = " + rc);
 		}
 
 		rc = callNativeApis.m0ClovisOpStatus(clovisOp);
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS && rc != StatusCodes.EEXIST) {
 			throw new IOException("Read : m0ClovisOpStatus() call fails rc = " + rc);
 		}
 
 		rc = callNativeApis.m0ClovisOpFini(clovisOp);
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisOpFini() call fails rc = " + rc);
 		}
 
 		rc = callNativeApis.m0ClovisOpFree(clovisOp);
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisOpFree() call fails rc = " + rc);
 		}
-
-		rc = callNativeApis.m0ClovisObjFini(eType);
-		if (rc != 0) {
-			throw new IOException("Read : m0ClovisObjFini() call fails rc = " + rc);
-		}
-
-		opList.remove(0);
-		opList.remove(0);
 
 		return dataRead;
 	}
@@ -183,7 +248,7 @@ public class ClovisReader {
 		int rc;
 
 		rc = callNativeApis.m0ClovisFreeBufVec(dataRead);
-		if (rc != 0) {
+		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisFreeBufVec() call fails rc = " + rc);
 		}
 

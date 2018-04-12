@@ -184,7 +184,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		} else if (buffersPerSplit == null) {
 			throw new IllegalArgumentException("Number of buffers per split was not specified in input format, nor configuration.");
 		}
-		
+
 		/**
 		 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProps()} will be overridden
 		 */
@@ -246,7 +246,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 		if (numOfSplits < minNumSplits) {
 			if (LOG.isWarnEnabled()) {
-				LOG.warn("Impossible to produce" + minNumSplits + " splits");
+				LOG.warn("Impossible to produce " + minNumSplits + " splits");
 			}
 		}
 
@@ -267,6 +267,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			inputSplits.add(is);
 
 		}
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Produced " + inputSplits.size() + " input splits");
+		}
+
 		return inputSplits.toArray(new ClovisInputSplit[inputSplits.size()]);
 	}
 
@@ -300,14 +305,24 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		clovisReader = new ClovisReader();
 		clovisReader.open(meroObjectId, meroBufferSize, meroChunkSize);
 
+		currentData = null;
+		dataIterator = null;
+		currentBuffer = null;
+		currentBufferOffset = 0;
+
 		this.end = false;
 	}
 
 	@Override
 	public void close() throws IOException {
-		if (currentBuffer != null) {
+		if (currentData != null) {
 			clovisReader.freeBuffer(currentData);
+			currentData = null;
 		}
+
+		dataIterator = null;
+		currentBuffer = null;
+		currentBufferOffset = 0;
 
 		deserializer.close();
 		clovisReader.close();
@@ -324,34 +339,69 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 	@Override
 	public T nextRecord(T reuse) throws IOException {
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Read next record");
+		}
+
 		//if we finished reading records from current buffer
 		if (currentData == null || !dataIterator.hasNext()) {
-			if (currentData != null)  {
-				//current buffer is now available for the next read task/
-				//or if there are no more buffers to pre-read -- put it to clean buffers
-				//to reuse when reading next InputSplit
 
-				if (inputSplitIterator.hasNext()) {
-					clovisReader.scheduleRead(inputSplitIterator.next());
-//					executor.execute(new ReadTask(currentBuffer, fullBufferQueue, inputSplitIterator.next()));
-				}
+			if (currentData != null) {
+				clovisReader.freeBuffer(currentData);
+				currentData = null;
+				dataIterator = null;
 			}
 
-			clovisReader.freeBuffer(currentData);
+			if (inputSplitIterator.hasNext()) {
+				clovisReader.scheduleRead(inputSplitIterator.next());
+			} else {
+				return null;
+			}
+
 			currentData = clovisReader.getNextBuffer();
 			dataIterator = currentData.iterator();
+
+			if (LOG.isWarnEnabled() && !dataIterator.hasNext()) {
+				LOG.warn("Mero returned empty ByteBuffer");
+			}
+
+			if (LOG.isDebugEnabled()) {
+				LOG.debug("Clovis returned vector with " + currentData.getNumberOfBuffers() + " ByteBuffers");
+			}
+
 			currentBuffer = dataIterator.next();
 			currentBufferOffset = 0;
-		} else if (currentBuffer.limit() <= currentBufferOffset) {
+		} else if (currentBufferOffset >= currentBuffer.limit()) {
 			currentBuffer = dataIterator.next();
 			currentBufferOffset = 0;
 		}
-		
-		if (deserializer.parseRecord(parsedValues, currentBuffer.array(), currentBufferOffset, currentBuffer.limit() - currentBufferOffset)) {
-			fillRecord(reuse, parsedValues);
-		} else {
-			return null;
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Parsing Clovis ByteBuffer at offset " + currentBufferOffset + "; buffer has " + currentBuffer.limit() + " bytes");
 		}
+
+		// Copy ByteBuffer into byte array. Maybe use ByteBuffer directly inside parseRecord()?
+		// Note: ByteBuffer.array() not implemented for this type of ByteBuffer
+		byte[] tmpBytes = new byte[currentBuffer.limit()];
+		for (int i = 0; i < currentBuffer.limit(); ++i) {
+			tmpBytes[i] = currentBuffer.get(i);
+		}
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Copied Clovis ByteBuffer to byte array: " + new String(tmpBytes, currentBufferOffset, currentBuffer.limit()));
+		}
+		currentBufferOffset = currentBuffer.limit();
+
+//		if (deserializer.parseRecord(parsedValues, tmpBytes, currentBufferOffset, 1 /*currentBuffer.limit() - currentBufferOffset */)) {
+//			fillRecord(reuse, parsedValues);
+//		} else {
+//			return null;
+//		}
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Done deserializing next record");
+		}
+
 		return reuse;
 	}
 	
