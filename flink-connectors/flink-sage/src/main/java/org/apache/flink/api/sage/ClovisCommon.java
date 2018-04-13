@@ -1,5 +1,7 @@
 package org.apache.flink.api.sage;
 
+import org.apache.flink.configuration.Configuration;
+
 import com.clovis.jni.enums.ClovisEntityType;
 import com.clovis.jni.enums.ClovisOpState;
 import com.clovis.jni.enums.ClovisRealmType;
@@ -34,7 +36,23 @@ public abstract class ClovisCommon {
 	private ClovisObjId objId;
 	protected ClovisOpState[] clovisOpStates;
 
-	protected int bufferSize;
+	protected int blockSize;
+
+	/**
+	 * ------------------------------------- Configuration Keys ------------------------------------------
+	 */
+	private static final String MERO_OBJECT_ID = "mero.object.id";
+	private static final String MERO_FILE_PATH = "mero.file.path";
+	private static final String MERO_BUFFER_SIZE = "mero.buffer.size";
+	private static final String MERO_CHUNK_SIZE = "mero.chunk.size";
+	private static final String OO_STORE = "clovis.object-store";
+	private static final String CLOVIS_LAYOUT_ID = "clovis.layout-id";
+	private static final String CLOVIS_LOCAL_ENDPOINT = "clovis.local-endpoint";
+	private static final String CLOVIS_HA_ENDPOINT = "clovis.ha-endpoint";
+	private static final String CLOVIS_CONFD_ENDPOINT = "clovis.confd-endpoint";
+	private static final String CLOVIS_PROF = "clovis.prof";
+	private static final String CLOVIS_PROF_ID = "clovis.prof-id";
+	private static final String CLOVIS_INDEX_DIR = "clovis.index-dir";
 
 	ClovisCommon() throws IOException {
 		this.callNativeApis = new ClovisJavaApis();
@@ -68,9 +86,39 @@ public abstract class ClovisCommon {
 		conf.setClovisIndexDir(ClovisClusterProps.getClovisIndexDir());
 	}
 
-	protected void open(long objectId, int bufferSize) throws IOException {
+	/**
+	 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProps()} will be overridden
+	 */
+	public static void setUserConfValues(Configuration parameters) {
 
-		this.bufferSize = bufferSize;
+		boolean ooStore = parameters.getBoolean(OO_STORE, false);
+		ClovisClusterProps.setOoStore(ooStore);
+
+		int clovisLayoutId = parameters.getInteger(CLOVIS_LAYOUT_ID, -1);
+		if (clovisLayoutId > 0) { ClovisClusterProps.setClovisLayoutId(clovisLayoutId); }
+
+		String clovisLocalEndpoint = parameters.getString(CLOVIS_LOCAL_ENDPOINT, null);
+		if (clovisLocalEndpoint != null) { ClovisClusterProps.setClovisLocalEndpoint(clovisLocalEndpoint); }
+
+		String clovisHaEndpoint = parameters.getString(CLOVIS_HA_ENDPOINT, null);
+		if (clovisHaEndpoint != null) { ClovisClusterProps.setClovisHaEndpoint(clovisHaEndpoint); }
+
+		String clovisConfdEndpoint = parameters.getString(CLOVIS_CONFD_ENDPOINT, null);
+		if (clovisConfdEndpoint != null) { ClovisClusterProps.setClovisConfdEndpoint(clovisConfdEndpoint); }
+
+		String clovisProf = parameters.getString(CLOVIS_PROF, null);
+		if (clovisProf != null) { ClovisClusterProps.setClovisProf(clovisProf); }
+
+		String clovisProfId = parameters.getString(CLOVIS_PROF_ID, null);
+		if (clovisProfId != null) { ClovisClusterProps.setClovisProfId(clovisProfId); }
+
+		String clovisIndexDir = parameters.getString(CLOVIS_INDEX_DIR, null);
+		if (clovisIndexDir != null) { ClovisClusterProps.setClovisIndexDir(clovisIndexDir); }
+	}
+
+	protected void open(long objectId, int blockSize) throws IOException {
+
+		this.blockSize = blockSize;
 
 		eType = EntityTypeFactory.getEntityType(ClovisEntityType.CLOVIS_OBJ);
 
@@ -78,7 +126,7 @@ public abstract class ClovisCommon {
 		objId.setHi(0);
 		objId.setLow(objectId);
 
-		if (callNativeApis.m0ClovisContainerInit(rType, clovisRealmObj, objId, clovisInstance) != 0) {
+		if (callNativeApis.m0ClovisContainerInit(rType, clovisRealmObj, objId, clovisInstance) != StatusCodes.SUCCESS) {
 			throw new IOException("Failed to initialize Clovis container");
 		}
 
@@ -105,7 +153,7 @@ public abstract class ClovisCommon {
 	}
 
 	protected ClovisBufVec allocBuffer(int blockCount) throws IOException {
-		return callNativeApis.m0BufvecAlloc(bufferSize, blockCount);
+		return callNativeApis.m0BufvecAlloc(blockSize, blockCount);
 	}
 
 	protected void freeBuffer(ClovisBufVec dataRead) throws IOException {

@@ -27,13 +27,13 @@ public class ClovisWriter extends ClovisCommon {
 	}
 
 	@Override
-	public void open(long objectId, int bufferSize) throws IOException {
+	public void open(long objectId, int blockSize) throws IOException {
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Open object " + objectId + " with buffer size " + bufferSize);
+			LOG.debug("Open object " + objectId + " with buffer size " + blockSize);
 		}
 
-		super.open(objectId, bufferSize);
+		super.open(objectId, blockSize);
 
 		opList = new ArrayList<>();
 		writeDataBufferList = new ArrayList<>();
@@ -63,8 +63,8 @@ public class ClovisWriter extends ClovisCommon {
 		ClovisBufVec attrWrite = null;
 
 		for (int i = 0; i < extWrite.getNumberOfSegs(); i++) {
-			extWrite.getIndexArray()[i] = bufferIndexes.get(i) * bufferSize;
-			extWrite.getOffSetArray()[i] = bufferSize;
+			extWrite.getIndexArray()[i] = bufferIndexes.get(i) * blockSize;
+			extWrite.getOffSetArray()[i] = blockSize;
 		}
 
 		ClovisOp clovisOp = new ClovisOp();

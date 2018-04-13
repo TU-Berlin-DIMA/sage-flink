@@ -29,13 +29,13 @@ public class ClovisReader extends ClovisCommon {
 		super();
 	}
 
-	public void open(long objectId, int bufferSize, int chunkSize) throws IOException {
+	public void open(long objectId, int blockSize, int chunkSize) throws IOException {
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Open object " + objectId + " with buffer size " + bufferSize + " and chunk size " + chunkSize);
+			LOG.debug("Open object " + objectId + " with block size " + blockSize + " and chunk size " + chunkSize);
 		}
 
-		super.open(objectId, bufferSize);
+		super.open(objectId, blockSize);
 
 		this.chunkSize = chunkSize;
 
@@ -62,14 +62,14 @@ public class ClovisReader extends ClovisCommon {
 		int rc;
 
 		ClovisIndexVec extRead = callNativeApis.m0IndexvecAlloc(chunkSize);
-		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(bufferSize, chunkSize);
+		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(blockSize, chunkSize);
 		ClovisBufVec attrRead = null;
 
-		long lastIndex = bufferSize * offset;
+		long lastIndex = blockSize * offset;
 		for (int i = 0; i < extRead.getNumberOfSegs(); i++) {
 			extRead.getIndexArray()[i] = lastIndex;
-			lastIndex += bufferSize;
-			extRead.getOffSetArray()[i] = bufferSize;
+			lastIndex += blockSize;
+			extRead.getOffSetArray()[i] = blockSize;
 		}
 
 		ClovisOp clovisOp = new ClovisOp();

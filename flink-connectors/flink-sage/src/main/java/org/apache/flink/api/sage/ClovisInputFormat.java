@@ -32,7 +32,6 @@ import org.apache.flink.core.io.InputSplitAssigner;
 import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import sdk.clovis.config.ClovisClusterProps;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -107,12 +106,8 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	 * Asynchronous tasks executor
 	 */
 	// private transient ClovisThreadPoolExecutor executor;
-	ClovisReader clovisReader;
-
-	/**
-	 * CSV Deserializer
-	 */
-	Deserializer<T> deserializer;
+	private transient ClovisReader clovisReader;
+	private Configuration configParameters;
 
 	/**
 	 * The buffer this InputFormat currently reads from
@@ -150,7 +145,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		this.meroChunkSize = meroChunkSize;
 		this.buffersPerSplit = 0;
 
-		this.deserializer = new Deserializer<>(DEFAULT_FIELD_DELIMITER, DEFAULT_LINE_DELIMITER, EMPTY_TYPES, EMPTY_INCLUDED);
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Constructor called");
+		}
 	}
 
 	public ClovisInputFormat(long meroObjectId, String meroFilePath, int meroBufferSize, int meroChunkSize, int buffersPerSplit) {
@@ -160,8 +157,6 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		this.meroBufferSize = meroBufferSize;
 		this.meroChunkSize = meroChunkSize;
 		this.buffersPerSplit = buffersPerSplit;
-
-		this.deserializer = new Deserializer<>(DEFAULT_FIELD_DELIMITER, DEFAULT_LINE_DELIMITER, EMPTY_TYPES, EMPTY_INCLUDED);
 	}
 
 	/**
@@ -178,39 +173,19 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public void configure(Configuration parameters) {
 
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Configure called");
+		}
+
+		// Store because we don't serialize clovisReader for transfer from Flink master to workers and must re-initialize
+		configParameters = parameters;
+
 		Integer buffPerSplit = parameters.getInteger(BUFFERS_PER_SPLIT_PARAMETER_KEY, -1);
 		if (buffPerSplit > 0) {
 			this.buffersPerSplit = buffPerSplit;
 		} else if (buffersPerSplit == null) {
 			throw new IllegalArgumentException("Number of buffers per split was not specified in input format, nor configuration.");
 		}
-
-		/**
-		 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProps()} will be overridden
-		 */
-		boolean ooStore = parameters.getBoolean(OO_STORE, false);
-		ClovisClusterProps.setOoStore(ooStore);
-
-		int clovisLayoutId = parameters.getInteger(CLOVIS_LAYOUT_ID, -1);
-		if (clovisLayoutId > 0) { ClovisClusterProps.setClovisLayoutId(clovisLayoutId); }
-
-		String clovisLocalEndpoint = parameters.getString(CLOVIS_LOCAL_ENDPOINT, null);
-		if (clovisLocalEndpoint != null) { ClovisClusterProps.setClovisLocalEndpoint(clovisLocalEndpoint); }
-
-		String clovisHaEndpoint = parameters.getString(CLOVIS_HA_ENDPOINT, null);
-		if (clovisHaEndpoint != null) { ClovisClusterProps.setClovisHaEndpoint(clovisHaEndpoint); }
-
-		String clovisConfdEndpoint = parameters.getString(CLOVIS_CONFD_ENDPOINT, null);
-		if (clovisConfdEndpoint != null) { ClovisClusterProps.setClovisConfdEndpoint(clovisConfdEndpoint); }
-
-		String clovisProf = parameters.getString(CLOVIS_PROF, null);
-		if (clovisProf != null) { ClovisClusterProps.setClovisProf(clovisProf); }
-
-		String clovisProfId = parameters.getString(CLOVIS_PROF_ID, null);
-		if (clovisProfId != null) { ClovisClusterProps.setClovisProfId(clovisProfId); }
-
-		String clovisIndexDir = parameters.getString(CLOVIS_INDEX_DIR, null);
-		if (clovisIndexDir != null) { ClovisClusterProps.setClovisIndexDir(clovisIndexDir); }
 	}
 
 	@Override
@@ -287,22 +262,17 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	@Override
 	public void open(ClovisInputSplit split) throws IOException {
 
-		deserializer.open();
-
 		//Iterator over the mero object offsets for the split received as a parameter
 		this.inputSplitIterator = split.getMeroObjectOffsets().iterator();
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Opening input split " + split.getSplitNumber());
 		}
-		
-		// create the value holders
-//		this.parsedValues = new Object[fieldParsers.length];
-//		for (int i = 0; i < fieldParsers.length; i++) {
-//			this.parsedValues[i] = fieldParsers[i].createValue();
-//		}
 
-		clovisReader = new ClovisReader();
+		if (clovisReader == null) {
+			clovisReader.setUserConfValues(configParameters);
+			clovisReader = new ClovisReader();
+		}
 		clovisReader.open(meroObjectId, meroBufferSize, meroChunkSize);
 
 		currentData = null;
@@ -324,12 +294,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 		currentBuffer = null;
 		currentBufferOffset = 0;
 
-		deserializer.close();
 		clovisReader.close();
 	}
 
 	public void setFields(Class<?> ... fieldTypes) {
-		deserializer.setFields(fieldTypes);
 	}
 	
 	@Override
@@ -339,6 +307,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 
 	@Override
 	public T nextRecord(T reuse) throws IOException {
+		System.out.println("Read next record");
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Read next record");
 		}
@@ -445,20 +414,6 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 	 * ------------------------------------- Config Keys ------------------------------------------
 	 */
 	private static final String BUFFERS_PER_SPLIT_PARAMETER_KEY = "buffers.per.split";
-
-	private static final String MERO_OBJECT_ID = "mero.object.id";
-	private static final String MERO_FILE_PATH = "mero.file.path";
-	private static final String MERO_BUFFER_SIZE = "mero.buffer.size";
-	private static final String MERO_CHUNK_SIZE = "mero.chunk.size";
-
-	private static final String OO_STORE = "clovis.object-store";
-	private static final String CLOVIS_LAYOUT_ID = "clovis.layout-id";
-	private static final String CLOVIS_LOCAL_ENDPOINT = "clovis.local-endpoint";
-	private static final String CLOVIS_HA_ENDPOINT = "clovis.ha-endpoint";
-	private static final String CLOVIS_CONFD_ENDPOINT = "clovis.confd-endpoint";
-	private static final String CLOVIS_PROF = "clovis.prof";
-	private static final String CLOVIS_PROF_ID = "clovis.prof-id";
-	private static final String CLOVIS_INDEX_DIR = "clovis.index-dir";
 
 	/**
 	 * Utility Methods
