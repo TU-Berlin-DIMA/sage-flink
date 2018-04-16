@@ -18,11 +18,10 @@
 
 package org.apache.flink.api.sage;
 
+import org.apache.flink.api.common.typeinfo.TypeHint;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
-import org.apache.flink.api.sage.ClovisInputFormat;
-import org.apache.flink.core.fs.Path;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
@@ -42,25 +41,18 @@ public class InputFormatStreamingTest {
 		long meroObjectId = 1048582;
 		String meroFilePath = "/tmp";
 		int meroBufferSize = 4096;
-		int meroChunkSize = 1;
 
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
 
 		env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
-		
-		//create input format
-		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<Tuple2<String, Integer>>(meroObjectId, meroFilePath, meroBufferSize, meroChunkSize);
-		
-		//define the types of the fields
-		inputFormat.setFields(String.class, Integer.class);
-		
-		//set the number of buffers per split to be used
-		inputFormat.setBuffersPerSplit(1);
-		
-		//create the DataStream using given input format (requires the TypeInformation parameter)
-		TypeInformation<Tuple2<String, Integer>> typeInfo = TupleTypeInfo.getBasicTupleTypeInfo(String.class, Integer.class);
 
-		DataStream<Tuple2<String, Integer>> datastream = env.createInput(inputFormat, typeInfo);
+		// Set the type returned by the InputFormat
+		TypeInformation<Tuple2<String, Integer>> typeInformation = TypeInformation.of(new TypeHint<Tuple2<String, Integer>>(){});
+
+		// Create the InputFormat
+		ClovisInputFormat<Tuple2<String, Integer>> inputFormat = new ClovisInputFormat<>(typeInformation, meroObjectId, meroFilePath, meroBufferSize);
+
+		DataStream<Tuple2<String, Integer>> datastream = env.createInput(inputFormat);
 		
 		datastream.print();
 
