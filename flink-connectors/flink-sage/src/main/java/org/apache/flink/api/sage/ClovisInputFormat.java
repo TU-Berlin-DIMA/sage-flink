@@ -273,7 +273,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			clovisReader.setUserConfValues(configParameters);
 			clovisReader = new ClovisReader();
 		}
-		clovisReader.open(meroObjectId, meroBufferSize, meroChunkSize);
+		clovisReader.open(meroObjectId, meroBufferSize);
 
 		currentData = null;
 		dataIterator = null;
@@ -322,7 +322,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> {
 			}
 
 			if (inputSplitIterator.hasNext()) {
-				clovisReader.scheduleRead(inputSplitIterator.next());
+				ArrayList<Integer> bufferIndexes = new ArrayList<>(1);
+				bufferIndexes.add(inputSplitIterator.next());
+				clovisReader.scheduleRead(bufferIndexes);
 			} else {
 				return null;
 			}

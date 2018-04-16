@@ -21,23 +21,19 @@ public class ClovisReader extends ClovisCommon {
 	private ArrayList<ClovisOp> opList;
 	private ArrayList<ClovisBufVec> readDataBufferList;
 
-	private int chunkSize;
-
 	private static final Logger LOG = LoggerFactory.getLogger(ClovisReader.class);
 
 	ClovisReader() throws IOException {
 		super();
 	}
 
-	public void open(long objectId, int blockSize, int chunkSize) throws IOException {
+	public void open(long objectId, int blockSize) throws IOException {
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Open object " + objectId + " with block size " + blockSize + " and chunk size " + chunkSize);
+			LOG.debug("Open object " + objectId + " with block size " + blockSize);
 		}
 
 		super.open(objectId, blockSize);
-
-		this.chunkSize = chunkSize;
 
 		opList = new ArrayList<>();
 		readDataBufferList = new ArrayList<>();
@@ -53,22 +49,20 @@ public class ClovisReader extends ClovisCommon {
 		super.freeBuffer(dataRead);
 	}
 
-	public void scheduleRead(int offset) throws IOException {
+	public void scheduleRead(ArrayList<Integer> bufferIndexes) throws IOException {
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Scheduled read with offset " + offset);
+			LOG.debug("Scheduled read");
 		}
 
 		int rc;
 
-		ClovisIndexVec extRead = callNativeApis.m0IndexvecAlloc(chunkSize);
-		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(blockSize, chunkSize);
+		ClovisIndexVec extRead = callNativeApis.m0IndexvecAlloc(bufferIndexes.size());
+		ClovisBufVec dataRead = callNativeApis.m0BufvecAlloc(blockSize, bufferIndexes.size());
 		ClovisBufVec attrRead = null;
 
-		long lastIndex = blockSize * offset;
 		for (int i = 0; i < extRead.getNumberOfSegs(); i++) {
-			extRead.getIndexArray()[i] = lastIndex;
-			lastIndex += blockSize;
+			extRead.getIndexArray()[i] = bufferIndexes.get(i) * blockSize;
 			extRead.getOffSetArray()[i] = blockSize;
 		}
 
