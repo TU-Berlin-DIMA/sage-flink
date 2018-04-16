@@ -26,21 +26,18 @@ public class ClovisOutputStream extends OutputStream {
 	private transient ClovisBufVec currentBufVec;
 	private transient ByteBuffer currentBlock;
 	private transient int currentBlockIndex;
-	private transient BlockInfo blockInfo;
 
 	private int blockRecordCount, totalRecordCount;
 	private long firstRecordStartPos = NO_RECORD;
 
 	ClovisOutputStream(ClovisWriter clovisWriter) {
+		super();
+
 		this.clovisWriter = clovisWriter;
 	}
 
 	public void open(long objectId, int blockSize) throws IOException {
 		clovisWriter.open(objectId, blockSize);
-
-		if (blockInfo == null) {
-			this.blockInfo = new BlockInfo();
-		}
 
 		if (currentBufVec == null) {
 			currentBufVec = clovisWriter.allocBuffer(BUFVEC_LENGTH);
@@ -52,8 +49,9 @@ public class ClovisOutputStream extends OutputStream {
 			currentBlock.rewind();
 		}
 
+		BlockInfo blockInfo = new BlockInfo();
 		this.blockSize = blockSize;
-		this.maxPayloadSize = blockSize - this.blockInfo.getInfoSize();
+		this.maxPayloadSize = blockSize - blockInfo.getInfoSize();
 		this.streamIndex = 0;
 		this.totalRecordCount = 0;
 	}
@@ -114,9 +112,11 @@ public class ClovisOutputStream extends OutputStream {
 			LOG.debug("WriteInfo with " + blockRecordCount + " records in block, " + totalRecordCount +
 				" total records and offset " + firstRecordStartPos + " bytes");
 		}
-		this.blockInfo.setRecordCount(this.blockRecordCount);
-		this.blockInfo.setAccumulatedRecordCount(this.totalRecordCount);
-		this.blockInfo.setFirstRecordStart(this.firstRecordStartPos == NO_RECORD ? 0 : this.firstRecordStartPos);
+
+		BlockInfo blockInfo = new BlockInfo();
+		blockInfo.setRecordCount(this.blockRecordCount);
+		blockInfo.setAccumulatedRecordCount(this.totalRecordCount);
+		blockInfo.setFirstRecordStart(this.firstRecordStartPos == NO_RECORD ? 0 : this.firstRecordStartPos);
 
 		// Write out BlockInfo at end of block
 		currentBlock.position(maxPayloadSize);
