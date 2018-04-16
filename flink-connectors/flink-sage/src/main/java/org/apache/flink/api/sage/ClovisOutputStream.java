@@ -2,6 +2,8 @@ package org.apache.flink.api.sage;
 
 import com.clovis.jni.pojo.ClovisBufVec;
 import org.apache.flink.api.common.io.BlockInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -12,6 +14,8 @@ import java.util.ArrayList;
  * Created by Clemens Lutz on 4/13/18.
  */
 public class ClovisOutputStream extends OutputStream {
+
+	private static final Logger LOG = LoggerFactory.getLogger(ClovisOutputStream.class);
 
 	private ClovisWriter clovisWriter;
 
@@ -89,6 +93,8 @@ public class ClovisOutputStream extends OutputStream {
 				clovisWriter.scheduleWrite(bufferIndexes, currentBufVec);
 				clovisWriter.writeFinish();
 				streamIndex++;
+				currentBufVec = clovisWriter.allocBuffer(BUFVEC_LENGTH);
+				currentBlockIndex = 0;
 			}
 
 			currentBlock = currentBufVec.get(currentBlockIndex);
@@ -104,6 +110,10 @@ public class ClovisOutputStream extends OutputStream {
 	}
 
 	private void writeInfo() throws IOException {
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("WriteInfo with " + blockRecordCount + " records in block, " + totalRecordCount +
+				" total records and offset " + firstRecordStartPos + " bytes");
+		}
 		this.blockInfo.setRecordCount(this.blockRecordCount);
 		this.blockInfo.setAccumulatedRecordCount(this.totalRecordCount);
 		this.blockInfo.setFirstRecordStart(this.firstRecordStartPos == NO_RECORD ? 0 : this.firstRecordStartPos);
