@@ -136,7 +136,6 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 
 		if (typeSerializer == null) {
 			this.typeSerializer = resultType.createSerializer(this.getRuntimeContext().getExecutionConfig());
-//			throw new IOException("DataSet type unknown - must call setInputType()");
 		}
 
 		if (clovisInputStream == null) {

@@ -63,7 +63,7 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> implements InputT
 	private String meroFilePath;
 	private int meroBlockSize;
 
-	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBlockSize, int meroChunkSize) throws IOException {
+	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBlockSize) throws IOException {
 
 		this.meroObjectId = meroObjectId;
 		this.meroFilePath = meroFilePath;
@@ -103,11 +103,6 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> implements InputT
 		if (clovisDataOutputView == null) {
 			clovisDataOutputView = new DataOutputViewStreamWrapper(clovisOutputStream);
 		}
-
-//		if (typeSerializer == null) {
-//			TypeInformation<T> typeInformation = TypeInformation.of(new TypeHint<T>(){});
-//			typeSerializer = typeInformation.createSerializer(new ExecutionConfig());
-//		}
 	}
 
 	@Override

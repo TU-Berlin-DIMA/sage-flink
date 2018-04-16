@@ -50,8 +50,8 @@ public class OutputFormatStreamingTest {
 			.fromElements("This,0\n" + "is,1\n" + "some,2\n" + "test,3\n" + "data,4\n")
 			.flatMap(new TupleGenerator());
 		
-		//create the output format, indicate the preferred storage type
-		ClovisOutputFormat<Tuple2<String, Integer>> outputFormat = new ClovisOutputFormat<Tuple2<String, Integer>>(meroObjectId, meroFilePath, meroBufferSize, meroChunkSize);
+		//create the output format
+		ClovisOutputFormat<Tuple2<String, Integer>> outputFormat = new ClovisOutputFormat<>(meroObjectId, meroFilePath, meroBufferSize);
 
 		outputFormat.setWriteMode(WriteMode.OVERWRITE);
 
