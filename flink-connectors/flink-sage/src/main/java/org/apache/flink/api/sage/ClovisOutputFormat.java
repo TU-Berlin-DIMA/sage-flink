@@ -96,6 +96,7 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> implements InputT
 		if (clovisOutputStream == null) {
 			ClovisWriter.setUserConfValues(configParameters);
 			clovisOutputStream = new ClovisOutputStream(new ClovisWriter());
+			clovisDataOutputView = null;
 		}
 		clovisOutputStream.open(meroObjectId, meroBlockSize);
 
