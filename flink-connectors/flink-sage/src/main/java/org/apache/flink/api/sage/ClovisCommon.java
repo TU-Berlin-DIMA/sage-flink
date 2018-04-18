@@ -61,17 +61,6 @@ public abstract class ClovisCommon {
 		this.clovisRealmObj = new ClovisRealm();
 
 		setDefaultConfValues(this.conf);
-		try {
-			if (callNativeApis.m0ClovisInit(conf, clovisInstance) != StatusCodes.SUCCESS) {
-				throw new IOException("Failed to initialize Clovis");
-			}
-		} catch (ClovisInvalidParametersException e) {
-			e.printStackTrace();
-			throw new IOException();
-		} catch (Exception e) {
-			e.printStackTrace();
-			throw new IOException();
-		}
 	}
 
 	private static void setDefaultConfValues(ClovisConf conf) {
@@ -120,11 +109,21 @@ public abstract class ClovisCommon {
 
 		this.blockSize = blockSize;
 
-		eType = EntityTypeFactory.getEntityType(ClovisEntityType.CLOVIS_OBJ);
-
 		objId = new ClovisObjId();
 		objId.setHi(0);
 		objId.setLow(objectId);
+
+		try {
+			if (callNativeApis.m0ClovisInit(conf, clovisInstance) != StatusCodes.SUCCESS) {
+				throw new IOException("Failed to initialize Clovis");
+			}
+		} catch (ClovisInvalidParametersException e) {
+			e.printStackTrace();
+			throw new IOException();
+		} catch (Exception e) {
+			e.printStackTrace();
+			throw new IOException();
+		}
 
 		if (callNativeApis.m0ClovisContainerInit(rType, clovisRealmObj, objId, clovisInstance) != StatusCodes.SUCCESS) {
 			throw new IOException("Failed to initialize Clovis container");
@@ -149,6 +148,10 @@ public abstract class ClovisCommon {
 		rc = callNativeApis.m0ClovisObjFini(eType);
 		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisObjFini() call fails rc = " + rc);
+		}
+		rc = callNativeApis.m0ClovisFini(clovisInstance);
+		if (rc != StatusCodes.SUCCESS) {
+			throw new IOException("Read : m0ClovisFini() call fails rc = " + rc);
 		}
 	}
 
