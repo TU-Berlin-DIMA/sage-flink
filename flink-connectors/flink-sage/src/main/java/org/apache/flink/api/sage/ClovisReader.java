@@ -21,6 +21,13 @@ public class ClovisReader extends ClovisCommon {
 	private ArrayList<ClovisOp> opList;
 	private ArrayList<ClovisBufVec> readDataBufferList;
 
+	/*
+	 * Work around a bug in Clovis JNI. Clovis allocates direct ByteBuffers in JVM,
+	 * but apparently frees the underlying memory in C. By keeping a reference, we
+	 * temporarily prevent the JVM from performing a double-free.
+	 */
+	private ArrayList<ClovisBufVec> freeDataBufferList;
+
 	private static final Logger LOG = LoggerFactory.getLogger(ClovisReader.class);
 
 	ClovisReader() throws IOException {
@@ -37,6 +44,7 @@ public class ClovisReader extends ClovisCommon {
 
 		opList = new ArrayList<>();
 		readDataBufferList = new ArrayList<>();
+		freeDataBufferList = new ArrayList<>();
 	}
 
 	@Override
@@ -52,7 +60,7 @@ public class ClovisReader extends ClovisCommon {
 	public void scheduleRead(ArrayList<Integer> bufferIndexes) throws IOException {
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Scheduled read");
+			LOG.debug("Scheduled read of index " + bufferIndexes.get(0));
 		}
 
 		int rc;
@@ -91,9 +99,11 @@ public class ClovisReader extends ClovisCommon {
 
 		int rc;
 
-		ClovisOp clovisOp = opList.get(0);
-		opList.remove(0);
-		ClovisBufVec dataRead = readDataBufferList.get(0);
+		ClovisOp clovisOp = opList.remove(0);
+		ClovisBufVec dataRead = readDataBufferList.remove(0);
+
+		// workaround Clovis JNI bug, see declaration of freeDataBufferList
+		freeDataBufferList.add(dataRead);
 
 		rc = callNativeApis.m0ClovisOpWait(clovisOp, clovisOpStates, TimeUtils.M0_TIME_NEVER);
 		if (rc != StatusCodes.SUCCESS) {
