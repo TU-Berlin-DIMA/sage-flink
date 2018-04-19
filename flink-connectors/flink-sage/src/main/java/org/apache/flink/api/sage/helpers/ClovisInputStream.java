@@ -1,9 +1,7 @@
-package org.apache.flink.api.sage;
+package org.apache.flink.api.sage.helpers;
 
 import com.clovis.jni.pojo.ClovisBufVec;
-import org.apache.flink.api.sage.helpers.ClovisBlockInfo;
-import org.apache.flink.api.sage.helpers.ClovisMasterBlock;
-import org.apache.flink.api.sage.helpers.ClovisReader;
+import org.apache.flink.api.sage.ClovisStatistics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

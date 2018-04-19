@@ -25,6 +25,7 @@ import org.apache.flink.api.common.io.statistics.BaseStatistics;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
+import org.apache.flink.api.sage.helpers.ClovisInputStream;
 import org.apache.flink.api.sage.helpers.ClovisReader;
 import org.apache.flink.api.sage.helpers.ClovisWriter;
 import org.apache.flink.configuration.Configuration;

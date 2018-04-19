@@ -1,9 +1,6 @@
-package org.apache.flink.api.sage;
+package org.apache.flink.api.sage.helpers;
 
 import com.clovis.jni.pojo.ClovisBufVec;
-import org.apache.flink.api.sage.helpers.ClovisBlockInfo;
-import org.apache.flink.api.sage.helpers.ClovisMasterBlock;
-import org.apache.flink.api.sage.helpers.ClovisWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,7 +29,7 @@ public class ClovisOutputStream extends OutputStream {
 	private int blockRecordCount, totalRecordCount;
 	private long firstRecordStartPos = NO_RECORD;
 
-	ClovisOutputStream(ClovisWriter clovisWriter) {
+	public ClovisOutputStream(ClovisWriter clovisWriter) {
 		super();
 
 		this.clovisWriter = clovisWriter;

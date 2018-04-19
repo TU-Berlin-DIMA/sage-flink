@@ -13,23 +13,23 @@ public class ClovisStatistics implements BaseStatistics {
 	private int blockSize;
 	private long numStreams;
 
-	ClovisStatistics() { }
+	public ClovisStatistics() { }
 
-	void setTotalBytes(long totalBytes) {
+	public void setTotalBytes(long totalBytes) {
 		this.totalBytes = totalBytes;
 	}
 
-	void setTotalRecords(long totalRecords) {
+	public void setTotalRecords(long totalRecords) {
 		this.totalRecords = totalRecords;
 	}
 
-	void setTotalBlocks(long totalBlocks) {
+	public void setTotalBlocks(long totalBlocks) {
 		this.totalBlocks = totalBlocks;
 	}
 
-	void setBlockSize(int blockSize) { this.blockSize = blockSize; }
+	public void setBlockSize(int blockSize) { this.blockSize = blockSize; }
 
-	void setNumStreams(long numStreams) {
+	public void setNumStreams(long numStreams) {
 		this.numStreams = numStreams;
 	}
 
