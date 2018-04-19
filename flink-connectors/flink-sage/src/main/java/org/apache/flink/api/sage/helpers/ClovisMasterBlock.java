@@ -1,4 +1,4 @@
-package org.apache.flink.api.sage;
+package org.apache.flink.api.sage.helpers;
 
 import java.nio.ByteBuffer;
 

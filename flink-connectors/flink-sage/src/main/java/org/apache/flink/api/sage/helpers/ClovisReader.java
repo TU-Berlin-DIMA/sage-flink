@@ -1,4 +1,4 @@
-package org.apache.flink.api.sage;
+package org.apache.flink.api.sage.helpers;
 
 import com.clovis.jni.enums.ClovisObjOpCode;
 import com.clovis.jni.pojo.ClovisOp;
@@ -30,7 +30,7 @@ public class ClovisReader extends ClovisCommon {
 
 	private static final Logger LOG = LoggerFactory.getLogger(ClovisReader.class);
 
-	ClovisReader() throws IOException {
+	public ClovisReader() throws IOException {
 		super();
 	}
 
