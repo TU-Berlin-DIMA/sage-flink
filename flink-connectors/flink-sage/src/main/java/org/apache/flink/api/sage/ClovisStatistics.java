@@ -9,9 +9,9 @@ public class ClovisStatistics implements BaseStatistics {
 
 	private long totalBytes;
 	private long totalRecords;
-	private int totalBlocks;
+	private long totalBlocks;
 	private int blockSize;
-	private int numStreams;
+	private long numStreams;
 
 	ClovisStatistics() { }
 
@@ -23,13 +23,13 @@ public class ClovisStatistics implements BaseStatistics {
 		this.totalRecords = totalRecords;
 	}
 
-	void setTotalBlocks(int totalBlocks) {
+	void setTotalBlocks(long totalBlocks) {
 		this.totalBlocks = totalBlocks;
 	}
 
 	void setBlockSize(int blockSize) { this.blockSize = blockSize; }
 
-	void setNumStreams(int numStreams) {
+	void setNumStreams(long numStreams) {
 		this.numStreams = numStreams;
 	}
 
@@ -48,11 +48,11 @@ public class ClovisStatistics implements BaseStatistics {
 		return totalBytes / totalRecords;
 	}
 
-	public int getTotalInputBlocks() { return totalBlocks; }
+	public long getTotalInputBlocks() { return totalBlocks; }
 
 	public int getBlockSize() { return blockSize; }
 
-	public int getNumStreams() {
+	public long getNumStreams() {
 		return numStreams;
 	}
 }

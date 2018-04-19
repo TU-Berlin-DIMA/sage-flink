@@ -118,8 +118,8 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 		}
 		ClovisStatistics statistics = clovisInputStream.getStatistics(meroObjectId, meroBlockSize);
 
-		final int numBlocks = statistics.getTotalInputBlocks();
-		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(numBlocks /* minNumSplits */);
+		final long numBlocks = statistics.getTotalInputBlocks();
+		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>((int)numBlocks /* minNumSplits */);
 
 		for (int i = 0; i < numBlocks; i++) {
 			ArrayList<Integer> clovisSplitBlocks = new ArrayList<>(1);

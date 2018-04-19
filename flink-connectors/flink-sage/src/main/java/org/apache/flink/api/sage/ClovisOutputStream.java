@@ -1,7 +1,6 @@
 package org.apache.flink.api.sage;
 
 import com.clovis.jni.pojo.ClovisBufVec;
-import org.apache.flink.api.common.io.BlockInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -49,7 +48,7 @@ public class ClovisOutputStream extends OutputStream {
 			currentBlock.rewind();
 		}
 
-		BlockInfo blockInfo = new BlockInfo();
+		ClovisBlockInfo blockInfo = new ClovisBlockInfo();
 		this.blockSize = blockSize;
 		this.maxPayloadSize = blockSize - blockInfo.getInfoSize();
 		this.streamIndex = 1;
@@ -131,16 +130,14 @@ public class ClovisOutputStream extends OutputStream {
 				" total records and offset " + firstRecordStartPos + " bytes");
 		}
 
-		BlockInfo blockInfo = new BlockInfo();
-		blockInfo.setRecordCount(this.blockRecordCount);
+		ClovisBlockInfo blockInfo = new ClovisBlockInfo();
+		blockInfo.setBlockRecordCount(this.blockRecordCount);
 		blockInfo.setAccumulatedRecordCount(this.totalRecordCount);
-		blockInfo.setFirstRecordStart(this.firstRecordStartPos == NO_RECORD ? 0 : this.firstRecordStartPos);
+		blockInfo.setFirstRecordStartOffset(this.firstRecordStartPos == NO_RECORD ? 0 : this.firstRecordStartPos);
 
 		// Write out BlockInfo at end of block
 		currentBlock.position(maxPayloadSize);
-		currentBlock.putLong(blockInfo.getRecordCount());
-		currentBlock.putLong(blockInfo.getAccumulatedRecordCount());
-		currentBlock.putLong(blockInfo.getFirstRecordStart());
+		blockInfo.write(currentBlock);
 
 		this.blockRecordCount = 0;
 		this.firstRecordStartPos = NO_RECORD;

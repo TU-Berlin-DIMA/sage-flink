@@ -1,7 +1,6 @@
 package org.apache.flink.api.sage;
 
 import com.clovis.jni.pojo.ClovisBufVec;
-import org.apache.flink.api.common.io.BlockInfo;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,8 +31,8 @@ public class ClovisInputStream extends InputStream {
 	private long firstRecordStartPos = NO_RECORD;
 	private long totalRecords = NO_RECORD;
 	private long totalBytes;
-	private int totalBlocks;
-	private int numStreams;
+	private long totalBlocks;
+	private long numStreams;
 
 	public ClovisInputStream(ClovisReader clovisReader) {
 		super();
@@ -58,7 +57,7 @@ public class ClovisInputStream extends InputStream {
 			currentBlock = currentBufVec.get(currentBlockIndex);
 			currentBlock.rewind();
 
-			BlockInfo blockInfo = new BlockInfo();
+			ClovisBlockInfo blockInfo = new ClovisBlockInfo();
 			this.blockSize = blockSize;
 			this.maxPayloadSize = blockSize - blockInfo.getInfoSize();
 
@@ -165,19 +164,17 @@ public class ClovisInputStream extends InputStream {
 	}
 
 	private void readInfo() {
-		BlockInfo blockInfo = new BlockInfo();
+		ClovisBlockInfo blockInfo = new ClovisBlockInfo();
 
 		// Read BlockInfo from end of block and reset to initial position
 		currentBlock.mark();
 		currentBlock.position(maxPayloadSize);
-		blockInfo.setRecordCount(currentBlock.getLong());
-		blockInfo.setAccumulatedRecordCount(currentBlock.getLong());
-		blockInfo.setFirstRecordStart(currentBlock.getLong());
+		blockInfo.read(currentBlock);
 		currentBlock.reset(); // Reset position to mark()
 
-		blockRecordCount = blockInfo.getRecordCount();
+		blockRecordCount = blockInfo.getBlockRecordCount();
 		accumulatedRecordCount = blockInfo.getAccumulatedRecordCount();
-		firstRecordStartPos = blockInfo.getFirstRecordStart();
+		firstRecordStartPos = blockInfo.getFirstRecordStartOffset();
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("ReadInfo with " + blockRecordCount + " records in block, " + accumulatedRecordCount +

@@ -7,47 +7,47 @@ import java.nio.ByteBuffer;
  */
 public class ClovisMasterBlock {
 
-	private int numStreams;
-	private int totalRecords;
-	private int totalBlocks;
+	private long numStreams;
+	private long totalRecords;
+	private long totalBlocks;
 
 	public int getMasterBlockSize() {
-		return 4 + 4 + 4;
+		return Long.BYTES + Long.BYTES + Long.BYTES;
 	}
 
 	public void write(ByteBuffer out) {
-		out.putInt(numStreams);
-		out.putInt(totalRecords);
-		out.putInt(totalBlocks);
+		out.putLong(numStreams);
+		out.putLong(totalRecords);
+		out.putLong(totalBlocks);
 	}
 
 	public void read(ByteBuffer in) {
-		numStreams = in.getInt();
-		totalRecords = in.getInt();
-		totalBlocks = in.getInt();
+		numStreams = in.getLong();
+		totalRecords = in.getLong();
+		totalBlocks = in.getLong();
 	}
 
-	public int getNumStreams() {
+	public long getNumStreams() {
 		return numStreams;
 	}
 
-	public void setNumStreams(int numStreams) {
+	public void setNumStreams(long numStreams) {
 		this.numStreams = numStreams;
 	}
 
-	public int getTotalRecords() {
+	public long getTotalRecords() {
 		return totalRecords;
 	}
 
-	public void setTotalRecords(int totalRecords) {
+	public void setTotalRecords(long totalRecords) {
 		this.totalRecords = totalRecords;
 	}
 
-	public int getTotalBlocks() {
+	public long getTotalBlocks() {
 		return totalBlocks;
 	}
 
-	public void setTotalBlocks(int totalBlocks) {
+	public void setTotalBlocks(long totalBlocks) {
 		this.totalBlocks = totalBlocks;
 	}
 }
