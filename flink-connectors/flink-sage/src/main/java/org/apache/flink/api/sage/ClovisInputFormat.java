@@ -53,6 +53,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 	private transient ClovisInputStream clovisInputStream;
 	private transient DataInputViewStreamWrapper clovisDataInputView;
 	private transient long recordsRead;
+	private transient long recordsRemaining;
 
 	private Configuration configParameters;
 
@@ -109,11 +110,22 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 			throw new IllegalArgumentException("Number of input splits has to be at least 1.");
 		}
 
-		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(minNumSplits);
+		if (clovisInputStream == null) {
+			ClovisWriter.setUserConfValues(configParameters);
+			ClovisReader clovisReader = new ClovisReader();
+			clovisInputStream = new ClovisInputStream(clovisReader);
+			clovisDataInputView = null;
+		}
+		ClovisStatistics statistics = clovisInputStream.getStatistics(meroObjectId, meroBlockSize);
 
-		ArrayList clovisSplitBlocks = new ArrayList<>(1);
-		clovisSplitBlocks.add(0);
-		inputSplits.add(new ClovisInputSplit(0, clovisSplitBlocks));
+		final int numBlocks = statistics.getTotalInputBlocks();
+		final List<ClovisInputSplit> inputSplits = new ArrayList<ClovisInputSplit>(numBlocks /* minNumSplits */);
+
+		for (int i = 0; i < numBlocks; i++) {
+			ArrayList<Integer> clovisSplitBlocks = new ArrayList<>(1);
+			clovisSplitBlocks.add(i);
+			inputSplits.add(new ClovisInputSplit(i, clovisSplitBlocks));
+		}
 
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Produced " + inputSplits.size() + " input splits");
@@ -134,6 +146,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 	@Override
 	public void open(ClovisInputSplit split) throws IOException {
 
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Opening input split " + split.getSplitNumber() + " at block " + split.getMeroObjectOffsets().get(0));
+		}
+
 		if (typeSerializer == null) {
 			this.typeSerializer = resultType.createSerializer(this.getRuntimeContext().getExecutionConfig());
 		}
@@ -150,15 +166,17 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 			clovisDataInputView = new DataInputViewStreamWrapper(clovisInputStream);
 		}
 
-		if (LOG.isDebugEnabled()) {
-			LOG.debug("Opening input split " + split.getSplitNumber());
-		}
+		// Skip to beginning of split
+		// TODO: support multiple blocks in a split
+		int blockIndex = split.getMeroObjectOffsets().get(0);
+		clovisInputStream.skipBlocks(blockIndex);
 
-		// TODO: Skip to first block of inputSplit. For now, just assume single split and skip to first record
-		//Iterator over the mero object offsets for the split received as a parameter
-		// this.inputSplitIterator = split.getMeroObjectOffsets().iterator();
 		if (clovisInputStream.isRecordAvailable()) {
 			clovisInputStream.skipToFirstRecordInBlock();
+			this.recordsRemaining = clovisInputStream.recordsInBlock();
+		}
+		else {
+			this.recordsRemaining = 0;
 		}
 
 		this.recordsRead = 0;
@@ -173,12 +191,11 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 	
 	@Override
 	public boolean reachedEnd() throws IOException {
-		return recordsRead >= clovisInputStream.recordsInBlock();
+		return recordsRemaining == 0;
 	}
 
 	@Override
 	public T nextRecord(T record) throws IOException {
-		System.out.println("Read next record");
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Read next record");
 		}
@@ -188,9 +205,10 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 		}
 		record = typeSerializer.deserialize(record, clovisDataInputView);
 		recordsRead++;
+		recordsRemaining--;
 
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Done deserializing next record");
+			LOG.debug("Done deserializing next record; records remaining: " + recordsRemaining);
 		}
 
 		return record;

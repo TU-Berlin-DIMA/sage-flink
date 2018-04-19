@@ -37,7 +37,7 @@ public class ClovisInputSplit implements InputSplit {
 	private final ArrayList<Integer> meroObjectOffsets;
 
 
-	public ClovisInputSplit(int splitNumber, ArrayList<Integer> offset_buffers) {
+	ClovisInputSplit(int splitNumber, ArrayList<Integer> offset_buffers) {
 
 		this.splitNumber = splitNumber;
 

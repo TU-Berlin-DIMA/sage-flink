@@ -52,20 +52,38 @@ public class ClovisOutputStream extends OutputStream {
 		BlockInfo blockInfo = new BlockInfo();
 		this.blockSize = blockSize;
 		this.maxPayloadSize = blockSize - blockInfo.getInfoSize();
-		this.streamIndex = 0;
+		this.streamIndex = 1;
 		this.totalRecordCount = 0;
 	}
 
 	@Override
 	public void close() throws IOException {
-		if (this.currentBlock.position() > 0) {
-			this.writeInfo();
+		ArrayList<Integer> bufferIndexes;
 
-			ArrayList<Integer> bufferIndexes = new ArrayList<>(1);
+		if (this.currentBlock.position() > 0) {
+			// Flush out currently open block
+			this.writeInfo();
+			bufferIndexes = new ArrayList<>(1);
 			bufferIndexes.add(streamIndex);
 			clovisWriter.scheduleWrite(bufferIndexes, currentBufVec);
 			clovisWriter.writeFinish();
+			streamIndex++;
 		}
+
+		// Gather metadata
+		ClovisMasterBlock masterBlock = new ClovisMasterBlock();
+		masterBlock.setNumStreams(1);
+		masterBlock.setTotalBlocks(streamIndex - 1 /* Exclude master block */);
+		masterBlock.setTotalRecords(totalRecordCount);
+
+		// Write metadata blocks
+		ClovisBufVec metaDataBufVec = clovisWriter.allocBuffer(1);
+		ByteBuffer masterByteBuffer = metaDataBufVec.get(0);
+		masterBlock.write(masterByteBuffer);
+		bufferIndexes = new ArrayList<>(1);
+		bufferIndexes.add(MASTER_BLOCK_INDEX);
+		clovisWriter.scheduleWrite(bufferIndexes, metaDataBufVec);
+		clovisWriter.writeFinish();
 
 		clovisWriter.close();
 		currentBlock = null;
@@ -130,4 +148,5 @@ public class ClovisOutputStream extends OutputStream {
 
 	private static final int BUFVEC_LENGTH = 1;
 	private static final int NO_RECORD = -1;
+	private static final int MASTER_BLOCK_INDEX = 0;
 }
