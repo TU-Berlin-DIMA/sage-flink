@@ -65,7 +65,7 @@ public class ClovisOutputFormat<T> extends RichOutputFormat<T> implements InputT
 	private String meroFilePath;
 	private int meroBlockSize;
 
-	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBlockSize) throws IOException {
+	public ClovisOutputFormat(long meroObjectId, String meroFilePath, int meroBlockSize) {
 
 		this.meroObjectId = meroObjectId;
 		this.meroFilePath = meroFilePath;
