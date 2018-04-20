@@ -16,12 +16,12 @@
  * limitations under the License.
  */
 
-package sdk.clovis.config;
+package org.apache.flink.api.sage.configuration;
 
 /**
  * Clovis Cluster Properties. Defaults can be overridden using the provided methods
  */
-public class ClovisClusterProps {
+public class ClovisClusterProperties {
 
 	private static boolean OO_STORE = false;
 	private static int CLOVIS_LAYOUT_ID = 9;

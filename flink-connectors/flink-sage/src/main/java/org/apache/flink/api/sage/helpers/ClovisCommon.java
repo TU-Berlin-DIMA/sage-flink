@@ -35,7 +35,7 @@ import com.clovis.jni.pojo.ClovisInstance;
 import com.clovis.jni.pojo.ClovisConf;
 import com.clovis.jni.startup.ClovisJavaApis;
 import com.clovis.jni.utils.StatusCodes;
-import sdk.clovis.config.ClovisClusterProps;
+import org.apache.flink.api.sage.configuration.ClovisClusterProperties;
 
 import java.io.IOException;
 
@@ -83,44 +83,44 @@ public abstract class ClovisCommon {
 
 	private static void setDefaultConfValues(ClovisConf conf) {
 
-		conf.setOoStore(ClovisClusterProps.getOoStore());
-		conf.setClovisLayoutId(ClovisClusterProps.getClovisLayoutId());
-		conf.setClovisLocalAddr(ClovisClusterProps.getClovisLocalEndpoint());
-		conf.setClovisHaAddr(ClovisClusterProps.getClovisHaEndpoint());
-		conf.setClovisConfdAddr(ClovisClusterProps.getClovisConfdEndpoint());
-		conf.setClovisProf(ClovisClusterProps.getClovisProf());
-		conf.setClovisProfFid(ClovisClusterProps.getClovisProfId());
-		conf.setClovisIndexDir(ClovisClusterProps.getClovisIndexDir());
+		conf.setOoStore(ClovisClusterProperties.getOoStore());
+		conf.setClovisLayoutId(ClovisClusterProperties.getClovisLayoutId());
+		conf.setClovisLocalAddr(ClovisClusterProperties.getClovisLocalEndpoint());
+		conf.setClovisHaAddr(ClovisClusterProperties.getClovisHaEndpoint());
+		conf.setClovisConfdAddr(ClovisClusterProperties.getClovisConfdEndpoint());
+		conf.setClovisProf(ClovisClusterProperties.getClovisProf());
+		conf.setClovisProfFid(ClovisClusterProperties.getClovisProfId());
+		conf.setClovisIndexDir(ClovisClusterProperties.getClovisIndexDir());
 	}
 
 	/**
-	 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProps()} will be overridden
+	 * When clovis cluster properties provided, the defaults from the {@link ClovisClusterProperties ()} will be overridden
 	 */
 	public static void setUserConfValues(Configuration parameters) {
 
 		boolean ooStore = parameters.getBoolean(OO_STORE, false);
-		ClovisClusterProps.setOoStore(ooStore);
+		ClovisClusterProperties.setOoStore(ooStore);
 
 		int clovisLayoutId = parameters.getInteger(CLOVIS_LAYOUT_ID, -1);
-		if (clovisLayoutId > 0) { ClovisClusterProps.setClovisLayoutId(clovisLayoutId); }
+		if (clovisLayoutId > 0) { ClovisClusterProperties.setClovisLayoutId(clovisLayoutId); }
 
 		String clovisLocalEndpoint = parameters.getString(CLOVIS_LOCAL_ENDPOINT, null);
-		if (clovisLocalEndpoint != null) { ClovisClusterProps.setClovisLocalEndpoint(clovisLocalEndpoint); }
+		if (clovisLocalEndpoint != null) { ClovisClusterProperties.setClovisLocalEndpoint(clovisLocalEndpoint); }
 
 		String clovisHaEndpoint = parameters.getString(CLOVIS_HA_ENDPOINT, null);
-		if (clovisHaEndpoint != null) { ClovisClusterProps.setClovisHaEndpoint(clovisHaEndpoint); }
+		if (clovisHaEndpoint != null) { ClovisClusterProperties.setClovisHaEndpoint(clovisHaEndpoint); }
 
 		String clovisConfdEndpoint = parameters.getString(CLOVIS_CONFD_ENDPOINT, null);
-		if (clovisConfdEndpoint != null) { ClovisClusterProps.setClovisConfdEndpoint(clovisConfdEndpoint); }
+		if (clovisConfdEndpoint != null) { ClovisClusterProperties.setClovisConfdEndpoint(clovisConfdEndpoint); }
 
 		String clovisProf = parameters.getString(CLOVIS_PROF, null);
-		if (clovisProf != null) { ClovisClusterProps.setClovisProf(clovisProf); }
+		if (clovisProf != null) { ClovisClusterProperties.setClovisProf(clovisProf); }
 
 		String clovisProfId = parameters.getString(CLOVIS_PROF_ID, null);
-		if (clovisProfId != null) { ClovisClusterProps.setClovisProfId(clovisProfId); }
+		if (clovisProfId != null) { ClovisClusterProperties.setClovisProfId(clovisProfId); }
 
 		String clovisIndexDir = parameters.getString(CLOVIS_INDEX_DIR, null);
-		if (clovisIndexDir != null) { ClovisClusterProps.setClovisIndexDir(clovisIndexDir); }
+		if (clovisIndexDir != null) { ClovisClusterProperties.setClovisIndexDir(clovisIndexDir); }
 	}
 
 	protected void open(long objectId, int blockSize) throws IOException {
