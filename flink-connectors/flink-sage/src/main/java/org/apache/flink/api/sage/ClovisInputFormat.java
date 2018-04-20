@@ -78,10 +78,6 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 		this.meroObjectId = meroObjectId;
 		this.meroFilePath = meroFilePath;
 		this.meroBlockSize = meroBlockSize;
-
-		if (LOG.isDebugEnabled()) {
-			LOG.debug("Constructor called");
-		}
 	}
 
 	/**
