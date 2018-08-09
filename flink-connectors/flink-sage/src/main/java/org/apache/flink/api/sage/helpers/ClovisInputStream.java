@@ -146,7 +146,63 @@ public class ClovisInputStream extends InputStream {
 	}
 
 	public long skipBlocks(long blocks) throws IOException {
-		return super.skip(blocks * maxPayloadSize);
+//		return super.skip(blocks * maxPayloadSize);
+		long skippedBytes = 0;
+
+		long skippedBlocks = blocks;
+
+		if (blocks == 0) {
+			return 0;
+		}
+
+		streamIndex += blocks;
+
+		// Skip the current block
+		skippedBytes += maxPayloadSize - currentBlock.position();
+
+		int remainingBlocksInBufvec = BUFVEC_LENGTH - currentBlockIndex - 1;
+
+		if (blocks <= remainingBlocksInBufvec) {
+			currentBlockIndex += blocks;
+
+			currentBlock = currentBufVec.get(currentBlockIndex);
+			currentBlock.rewind();
+			this.readInfo();
+			skippedBytes += maxPayloadSize * (blocks - 1);
+		}
+		// Note: streamIndex includes master block, but totalBlocks does not
+		else if (streamIndex < totalBlocks + 1) {
+			// Get the bufvec
+			clovisReader.freeBuffer(currentBufVec);
+			currentBufVec = null;
+			currentBlock = null;
+			ArrayList<Integer> bufferIndexes = new ArrayList<>(1);
+			bufferIndexes.add(streamIndex);
+			clovisReader.scheduleRead(bufferIndexes);
+			currentBufVec = clovisReader.getNextBuffer();
+
+			// Setup the block so that the next byte can be read by a call to read()
+			currentBlockIndex = 0;
+			currentBlock = currentBufVec.get(currentBlockIndex);
+			currentBlock.rewind();
+			this.readInfo();
+
+			// Calculate how many bytes we've skipped - just imagine how efficient we are!
+			skippedBytes += maxPayloadSize * (blocks - 1);
+		}
+		// Else, we skipped past the end of the stream.
+		// Ensure that calls to isAvailable and isRecordAvailable return false
+		else {
+			firstRecordStartPos = NO_RECORD;
+			blockRecordCount = 0;
+		}
+
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Skipped " + skippedBytes + " bytes and " + skippedBlocks + " blocks");
+		}
+		System.out.println("Skipped " + skippedBytes + " bytes and " + skippedBlocks + " blocks");
+
+		return skippedBytes;
 	}
 
 	public long skipToFirstRecordInBlock() throws IOException {

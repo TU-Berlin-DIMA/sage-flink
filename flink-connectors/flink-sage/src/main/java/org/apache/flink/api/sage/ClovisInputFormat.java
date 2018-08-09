@@ -203,6 +203,7 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 			return null;
 		}
 		record = typeSerializer.deserialize(record, clovisDataInputView);
+		typeSerializer.getLength();
 		recordsRead++;
 		recordsRemaining--;
 
