@@ -144,9 +144,8 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 	 */
 	@Override
 	public void open(ClovisInputSplit split) throws IOException {
-
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("Opening input split " + split.getSplitNumber() + " at block " + split.getMeroObjectOffsets().get(0));
+			LOG.debug("ENTER open(split), split = {}, block = {}", split.getSplitNumber(), split.getMeroObjectOffsets().get(0));
 		}
 
 		if (typeSerializer == null) {
@@ -179,6 +178,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 		}
 
 		this.recordsRead = 0;
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("EXIT open(split), split = {}, block = {}", split.getSplitNumber(), split.getMeroObjectOffsets().get(0));
+		}
 	}
 
 	@Override
@@ -195,9 +197,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 
 	@Override
 	public T nextRecord(T record) throws IOException {
-		if (LOG.isDebugEnabled()) {
-			LOG.debug("Read next record");
-		}
+//		if (LOG.isDebugEnabled()) {
+//			LOG.debug("ENTER nextRecord, recordsRemaining = {}", recordsRemaining);
+//		}
 
 		if (this.reachedEnd()) {
 			return null;
@@ -207,9 +209,9 @@ public class ClovisInputFormat<T> extends RichInputFormat<T, ClovisInputSplit> i
 		recordsRead++;
 		recordsRemaining--;
 
-		if (LOG.isDebugEnabled()) {
-			LOG.debug("Done deserializing next record; records remaining: " + recordsRemaining);
-		}
+//		if (LOG.isDebugEnabled()) {
+//			LOG.debug("BEFORE EXIT nextRecord, recordsRemaining = {}", recordsRemaining);
+//		}
 
 		return record;
 	}

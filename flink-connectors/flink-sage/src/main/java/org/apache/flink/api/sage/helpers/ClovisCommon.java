@@ -39,10 +39,15 @@ import org.apache.flink.api.sage.configuration.ClovisClusterProperties;
 
 import java.io.IOException;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 /**
  * Created by Clemens Lutz on 4/12/18.
  */
 public abstract class ClovisCommon {
+
+	private static final Logger LOG = LoggerFactory.getLogger(ClovisCommon.class);
 
 	private RealmType rType = RealmTypeFactory.getRealmType(ClovisRealmType.CLOVIS_CONTAINER);
 	private ClovisConf conf;
@@ -178,6 +183,12 @@ public abstract class ClovisCommon {
 	}
 
 	protected void freeBuffer(ClovisBufVec dataRead) throws IOException {
+		/*
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Skipping call to m0ClovisFreeBufVec");
+		}
+		*/
+
 		int rc;
 
 		rc = callNativeApis.m0ClovisFreeBufVec(dataRead);

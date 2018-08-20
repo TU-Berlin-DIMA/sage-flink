@@ -60,12 +60,18 @@ public class ClovisInputStream extends InputStream {
 	}
 
 	public void open(long objectId, int blockSize) throws IOException {
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("ENTER ClovisInputStream::open({}, {})", objectId, blockSize);
+		}
 		clovisReader.open(objectId, blockSize);
 
 		if (totalRecords == NO_RECORD) {
 			readMaster();
 		}
 
+		if ((LOG.isDebugEnabled())) {
+			LOG.debug("totalBlocks = {}", totalBlocks);
+		}
 		if (totalBlocks > 0) {
 			this.streamIndex = 1;
 			ArrayList<Integer> bufferIndexes = new ArrayList<>(1);
@@ -81,6 +87,9 @@ public class ClovisInputStream extends InputStream {
 			this.maxPayloadSize = blockSize - blockInfo.getInfoSize();
 
 			this.readInfo();
+		}
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("ENTER ClovisInputStream::open({}, {})", objectId, blockSize);
 		}
 	}
 
@@ -111,6 +120,9 @@ public class ClovisInputStream extends InputStream {
 
 	@Override
 	public int read() throws IOException {
+		// if (LOG.isDebugEnabled()) {
+		// 	LOG.debug("ENTER read: currentBlock.position() = {}, maxPayloadSize = {}, streamIndex = {}, totalBlocks = {}, currentBlockIndex = {}, BUFVEC_LENGTH = {}", currentBlock.position(), maxPayloadSize, streamIndex, totalBlocks, currentBlockIndex, BUFVEC_LENGTH);
+		// }
 
 		byte b = currentBlock.get();
 
@@ -137,7 +149,15 @@ public class ClovisInputStream extends InputStream {
 			}
 		}
 
+//		if (LOG.isDebugEnabled()) {
+//			LOG.debug("BEFORE EXIT read: b = {}, currentBlock.position() = {}, maxPayloadSize = {}, streamIndex = {}, totalBlocks = {}, currentBlockIndex = {}, BUFVEC_LENGTH = {}", b, currentBlock.position(), maxPayloadSize, streamIndex, totalBlocks, currentBlockIndex, BUFVEC_LENGTH);
+//		}
+
 		return (int) b;
+	}
+
+	public void wtf() {
+
 	}
 
 	@Override
@@ -146,7 +166,13 @@ public class ClovisInputStream extends InputStream {
 	}
 
 	public long skipBlocks(long blocks) throws IOException {
-//		return super.skip(blocks * maxPayloadSize);
+		/*
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Skipping {} blocks with read", blocks);
+		}
+		return super.skip(blocks * maxPayloadSize);
+		*/
+
 		long skippedBytes = 0;
 
 		long skippedBlocks = blocks;
@@ -200,7 +226,6 @@ public class ClovisInputStream extends InputStream {
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Skipped " + skippedBytes + " bytes and " + skippedBlocks + " blocks");
 		}
-		System.out.println("Skipped " + skippedBytes + " bytes and " + skippedBlocks + " blocks");
 
 		return skippedBytes;
 	}
@@ -258,6 +283,9 @@ public class ClovisInputStream extends InputStream {
 	}
 
 	private void readMaster() throws IOException {
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Start reading master block");
+		}
 		ClovisMasterBlock masterBlock = new ClovisMasterBlock();
 		ArrayList<Integer> bufferIndexes = new ArrayList<>(1);
 		bufferIndexes.add(MASTER_BLOCK_INDEX);
@@ -273,6 +301,10 @@ public class ClovisInputStream extends InputStream {
 		numStreams = masterBlock.getNumStreams();
 
 		clovisReader.freeBuffer(metaDataBufVec);
+		if (LOG.isDebugEnabled()) {
+			LOG.debug("Finish reading master block");
+		}
+
 	}
 
 	private static final int BUFVEC_LENGTH = 1;
