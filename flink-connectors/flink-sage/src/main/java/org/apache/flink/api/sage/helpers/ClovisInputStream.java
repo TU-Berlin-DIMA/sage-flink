@@ -149,15 +149,13 @@ public class ClovisInputStream extends InputStream {
 			}
 		}
 
+		int result = b & 0xFF;
+
 //		if (LOG.isDebugEnabled()) {
-//			LOG.debug("BEFORE EXIT read: b = {}, currentBlock.position() = {}, maxPayloadSize = {}, streamIndex = {}, totalBlocks = {}, currentBlockIndex = {}, BUFVEC_LENGTH = {}", b, currentBlock.position(), maxPayloadSize, streamIndex, totalBlocks, currentBlockIndex, BUFVEC_LENGTH);
-//		}
+//			LOG.debug("BEFORE EXIT read: b = {}, result = {}, currentBlock.position() = {}, maxPayloadSize = {}, streamIndex = {}, totalBlocks = {}, currentBlockIndex = {}, BUFVEC_LENGTH = {}", b, result, currentBlock.position(), maxPayloadSize, streamIndex, totalBlocks, currentBlockIndex, BUFVEC_LENGTH);
+//cl		}
 
-		return (int) b;
-	}
-
-	public void wtf() {
-
+		return result;
 	}
 
 	@Override
