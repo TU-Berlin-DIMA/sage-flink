@@ -183,11 +183,10 @@ public abstract class ClovisCommon {
 	}
 
 	protected void freeBuffer(ClovisBufVec dataRead) throws IOException {
-		/*
 		if (LOG.isDebugEnabled()) {
 			LOG.debug("Skipping call to m0ClovisFreeBufVec");
 		}
-		*/
+		/*
 
 		int rc;
 
@@ -195,5 +194,6 @@ public abstract class ClovisCommon {
 		if (rc != StatusCodes.SUCCESS) {
 			throw new IOException("Read : m0ClovisFreeBufVec() call fails rc = " + rc);
 		}
+		*/
 	}
 }
