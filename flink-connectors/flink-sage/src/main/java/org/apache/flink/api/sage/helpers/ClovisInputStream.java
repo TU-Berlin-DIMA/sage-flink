@@ -89,7 +89,7 @@ public class ClovisInputStream extends InputStream {
 			this.readInfo();
 		}
 		if (LOG.isDebugEnabled()) {
-			LOG.debug("ENTER ClovisInputStream::open({}, {})", objectId, blockSize);
+			LOG.debug("EXIT ClovisInputStream::open({}, {})", objectId, blockSize);
 		}
 	}
 
@@ -153,7 +153,7 @@ public class ClovisInputStream extends InputStream {
 
 //		if (LOG.isDebugEnabled()) {
 //			LOG.debug("BEFORE EXIT read: b = {}, result = {}, currentBlock.position() = {}, maxPayloadSize = {}, streamIndex = {}, totalBlocks = {}, currentBlockIndex = {}, BUFVEC_LENGTH = {}", b, result, currentBlock.position(), maxPayloadSize, streamIndex, totalBlocks, currentBlockIndex, BUFVEC_LENGTH);
-//cl		}
+//		}
 
 		return result;
 	}
